@@ -4,3 +4,4 @@ Xenon.rbxm
 # created and removed by tests/mapping_test.luau
 tests/_fixture/
 tests/_pull_fixture/
+tests/_init_fixture/

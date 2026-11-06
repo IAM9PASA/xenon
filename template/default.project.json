@@ -1,0 +1,45 @@
+{
+  "name": "{{name}}",
+  "placeIds": [],
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedFirst": {
+      "$path": "src/ReplicatedFirst",
+      "$keepUnknowns": true
+    },
+    "ReplicatedStorage": {
+      "$path": "src/ReplicatedStorage",
+      "$keepUnknowns": true,
+      "Packages": {
+        "$path": "Packages",
+        "$keepUnknowns": true
+      }
+    },
+    "ServerScriptService": {
+      "$path": "src/ServerScriptService",
+      "$keepUnknowns": true,
+      "ServerPackages": {
+        "$path": "ServerPackages",
+        "$keepUnknowns": true
+      }
+    },
+    "ServerStorage": {
+      "$path": "src/ServerStorage",
+      "$keepUnknowns": true
+    },
+    "StarterGui": {
+      "$path": "src/StarterGui",
+      "$keepUnknowns": true
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "$path": "src/StarterPlayer/StarterPlayerScripts",
+        "$keepUnknowns": true
+      },
+      "StarterCharacterScripts": {
+        "$path": "src/StarterPlayer/StarterCharacterScripts",
+        "$keepUnknowns": true
+      }
+    }
+  }
+}

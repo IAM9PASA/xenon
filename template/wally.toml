@@ -1,0 +1,14 @@
+[package]
+name = "me/{{package}}"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+private = true
+
+# shared packages -> ReplicatedStorage.Packages, then: wally install
+[dependencies]
+# vide = "centau/vide@0.3.1"
+# Janitor = "howmanysmall/janitor@1.18.3"
+
+# server-only packages -> ServerScriptService.ServerPackages
+[server-dependencies]

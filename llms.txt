@@ -9,7 +9,9 @@
 
 ## Code
 
-- [CLI](xenon.luau): xenon serve / build / test / version
+- [CLI](xenon.luau): xenon init / serve / build / test / version
+- [Init](src/init_project.luau) + [template/](template/): new project scaffold
+- [Installers](install.ps1), [install.sh](install.sh)
 - [Server](src/server.luau): HTTP API on localhost
 - [Mapping](src/mapping.luau): files -> Studio instance paths
 - [Models](src/model.luau): .rbxm / .model.json / .txt -> JSON trees, .json / .toml -> modules

@@ -41,7 +41,7 @@ Studio plugin ── polls /changes every poll_seconds ──► plan (create/up
 
 | File | Responsibility |
 | --- | --- |
-| `xenon.luau` | CLI entry. Commands: `serve`, `build`, `test`, `version`, `help`. Resolves relative paths against env `XENON_CWD`. |
+| `xenon.luau` | CLI entry. Commands: `init`, `serve`, `build`, `test`, `version`, `help`. Resolves relative paths against env `XENON_CWD`. |
 | `bin/xenon.cmd`, `bin/xenon` | Launchers. Set `XENON_CWD` to the caller's folder, `cd` into the xenon folder (so rokit finds Lune), run `lune run xenon.luau <args>`. |
 | `src/server.luau` | Module `{ start(project_file, port) }`. Initial snapshot, HTTP server, rescan loop, change log (max 2000 items). |
 | `src/mapping.luau` | `load_project(file)`, `snapshot(project, cache)`. Turns files into entries (section 5). |
@@ -65,6 +65,12 @@ xenon help | --help | -h
 ```
 
 Errors exit with code 1 and a `[xenon] ...` message (e.g. missing project file).
+
+### init / install
+
+- `xenon init [folder]` → `src/init_project.luau(template_dir, target, name)`: copies `template/` recursively, replaces `{{name}}` (folder name) and `{{package}}` (lowercase, dashes) in every file, renames `gitignore.txt` → `.gitignore`. MUST refuse a target that is a file or a non-empty folder (never overwrites). Tested in `tests/init_test.luau` (also maps the result).
+- `install.ps1` / `install.sh`: check rokit → `rokit install --no-trust-check` (lune) → add `bin/` to user PATH (Windows user env var / shell profile line) → `xenon build` → `xenon version`. Idempotent; no other system changes.
+- `src/build.luau` plugin folder: `%LOCALAPPDATA%/Roblox/Plugins` on Windows, `~/Documents/Roblox/Plugins` otherwise.
 
 ## 5. Mapping rules (`src/mapping.luau`)
 

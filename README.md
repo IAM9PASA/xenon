@@ -18,6 +18,8 @@ Built because Argon wanted to delete 1,386 Studio-only things (UI, models) from 
 
 ## Quick start
 
+New game? `xenon init my-game` makes a ready project (see [New project](#new-project)).
+
 1. **Start the server** in your game folder (where `default.project.json` is):
    ```
    xenon serve
@@ -31,27 +33,55 @@ Stop the server with **Ctrl+C**.
 
 ## Install
 
-You need [rokit](https://github.com/rojo-rbx/rokit) (installs Lune for you).
+You need [rokit](https://github.com/rojo-rbx/rokit) (it installs Lune for you) and git.
 
-1. Get the code:
-   ```
-   git clone https://github.com/IAM9PASA/xenon "D:/coding/roblox work/tools/xenon"
-   ```
-2. Install Lune (inside the xenon folder):
-   ```
-   cd "D:/coding/roblox work/tools/xenon"
-   rokit install
-   ```
-3. **Add the `bin` folder to your PATH** so `xenon` works everywhere:
-   `D:\coding\roblox work\tools\xenon\bin`
-   (Windows: Start → "Edit the system environment variables" → Environment Variables → Path → New)
-4. Install the Studio plugin:
-   ```
-   xenon build
-   ```
-   then restart Studio.
+```
+git clone https://github.com/IAM9PASA/xenon
+cd xenon
+```
 
-Check it works: `xenon version`
+**Windows** (PowerShell):
+```
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+**macOS / Linux / Git Bash:**
+```
+sh install.sh
+```
+
+The installer installs Lune, adds `xenon/bin` to your PATH, and builds + installs the Studio plugin. Nothing else.
+Then **open a new terminal** and **restart Studio**. Check: `xenon version`
+
+To update later: `git pull`, then run the installer again.
+
+---
+
+## New project
+
+```
+xenon init my-game
+cd my-game
+rokit install
+xenon serve
+```
+
+`xenon init` copies the template into a **new or empty** folder (it refuses a folder that has files, so it can't overwrite anything):
+
+```
+my-game/
+  default.project.json   every service mapped, Wally Packages + ServerPackages, $keepUnknowns
+  wally.toml             add packages here, then `wally install`
+  rokit.toml             wally
+  selene.toml, .gitignore, README.md
+  src/
+    ReplicatedStorage/Shared/greet.luau          shared module
+    ServerScriptService/Server/main.server.luau  server entry
+    StarterPlayer/StarterPlayerScripts/Client/main.client.luau   client entry
+    StarterPlayer/StarterCharacterScripts/, StarterGui/, ServerStorage/, ReplicatedFirst/
+```
+
+Put your place id in `placeIds` so Xenon only syncs into that game. The template lives in `template/`; edit it to change what new projects start with (`{{name}}` and `{{package}}` are filled in).
 
 ---
 
@@ -115,6 +145,7 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 ## Commands
 
 ```
+xenon init [folder]                     new game project from the template
 xenon serve [project.json] [--port N]   start syncing (default ./default.project.json, port 34872)
 xenon build                             build + install the Studio plugin
 xenon test                              run the tests
@@ -205,8 +236,11 @@ xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 | `src/pull.luau` | Studio → disk rules: where a pulled script goes, what is refused |
 | `src/server.luau` | watches files, HTTP API on localhost |
 | `src/build.luau` | packs the plugin into `Xenon.rbxm` |
+| `src/init_project.luau` | `xenon init`: copies `template/` |
+| `template/` | what a new project starts with |
+| `install.ps1`, `install.sh` | installers |
 | `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
-| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau` |
+| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau`, `init_test.luau` |
 | `docs/AI.md` | full spec for AI assistants |
 
 Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.

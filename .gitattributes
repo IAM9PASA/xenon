@@ -1,3 +1,5 @@
 # shell launcher must keep LF or sh refuses to run it
 bin/xenon text eol=lf
 *.cmd text eol=crlf
+install.sh text eol=lf
+*.ps1 text eol=crlf

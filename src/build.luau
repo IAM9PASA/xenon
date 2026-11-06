@@ -20,7 +20,15 @@ return function()
 	diff.Source = fs.readFile("src/diff.luau")
 	diff.Parent = plugin_script
 
-	local plugins_dir = process.env.LOCALAPPDATA .. "/Roblox/Plugins"
+	-- windows: %LOCALAPPDATA%\Roblox\Plugins, mac: ~/Documents/Roblox/Plugins
+	local plugins_dir
+	if process.env.LOCALAPPDATA then
+		plugins_dir = process.env.LOCALAPPDATA .. "/Roblox/Plugins"
+	elseif process.env.HOME then
+		plugins_dir = process.env.HOME .. "/Documents/Roblox/Plugins"
+	else
+		error("can't find the Roblox Plugins folder (no LOCALAPPDATA or HOME)")
+	end
 	if not fs.isDir(plugins_dir) then
 		fs.writeDir(plugins_dir)
 	end

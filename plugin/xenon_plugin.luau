@@ -304,7 +304,7 @@ local open_diff -- defined below, needs the server + studio helpers
 
 -- entry given (a script) -> the row is clickable and opens its diff
 local function add_row(tag: string, color: Color3, key: string, order: number, entry)
-	local clickable = entry ~= nil and not entry.folder and not entry.model
+	local clickable = entry ~= nil and not entry.folder and not entry.model and not entry.reason
 	local row = make(clickable and "TextButton" or "Frame", {
 		Size = UDim2.new(1, 0, 0, 20),
 		BackgroundColor3 = COLOR.line,
@@ -313,7 +313,7 @@ local function add_row(tag: string, color: Color3, key: string, order: number, e
 		LayoutOrder = order,
 	}, list)
 	text({ Position = UDim2.fromOffset(4, 0), Size = UDim2.fromOffset(62, 20), Font = Enum.Font.BuilderSansBold, TextSize = 12, TextColor3 = color, Text = tag }, row)
-	local label = text({ Position = UDim2.fromOffset(68, 0), Size = UDim2.new(1, clickable and -88 or -68, 1, 0), TextSize = 13, Text = short_path(key), TextTruncate = Enum.TextTruncate.AtEnd }, row)
+	local label = text({ Position = UDim2.fromOffset(68, 0), Size = UDim2.new(1, clickable and -88 or -68, 1, 0), TextSize = 13, Text = short_path(key) .. (entry and entry.reason and `   · {entry.reason}` or ""), TextTruncate = Enum.TextTruncate.AtEnd }, row)
 	label.TextWrapped = false
 	if not clickable then
 		return
@@ -341,8 +341,8 @@ end
 -- plan = { create, update, conflicts, skip, models_changed }
 local function show_plan(plan)
 	clear_list()
-	set_chip(chip_update, #plan.update, "update")
-	set_chip(chip_new, #plan.create, "new")
+	set_chip(chip_update, #plan.update, plan.pull and "to disk" or "update")
+	set_chip(chip_new, #plan.create, plan.pull and "new file" or "new")
 	set_chip(chip_conflict, #plan.conflicts, #plan.conflicts == 1 and "conflict" or "conflicts")
 	set_chip(chip_kept, #plan.skip + #plan.models_changed, "kept as is")
 	set_chip(chip_remove, #plan.remove, "delete")
@@ -361,8 +361,8 @@ local function show_plan(plan)
 	end
 	rows(plan.conflicts, "CONFLICT", COLOR.red)
 	rows(plan.remove, "DELETE", COLOR.red)
-	rows(plan.update, "UPDATE", COLOR.blue)
-	rows(plan.create, "NEW", COLOR.green)
+	rows(plan.update, plan.pull and "TO DISK" or "UPDATE", COLOR.blue)
+	rows(plan.create, plan.pull and "NEW FILE" or "NEW", COLOR.green)
 	rows(plan.models_changed, "KEPT", COLOR.yellow)
 	rows(plan.skip, "SKIPPED", COLOR.dim)
 	local total = #plan.conflicts + #plan.remove + #plan.update + #plan.create + #plan.models_changed + #plan.skip
@@ -374,14 +374,17 @@ end
 
 local function refresh_buttons()
 	if pending then
-		primary_button.Text = "Apply"
+		primary_button.Text = pending.pull and "Write to disk" or "Apply"
 		primary_button.BackgroundColor3 = COLOR.green
 		secondary_button.Text = "Cancel"
+		secondary_button.BackgroundColor3 = COLOR.grey
 		secondary_button.Visible = true
 	elseif connected then
 		primary_button.Text = "Disconnect"
 		primary_button.BackgroundColor3 = COLOR.grey
-		secondary_button.Visible = false
+		secondary_button.Text = "Pull from Studio"
+		secondary_button.BackgroundColor3 = COLOR.blue
+		secondary_button.Visible = true
 	else
 		primary_button.Text = "Connect"
 		primary_button.BackgroundColor3 = COLOR.blue
@@ -514,8 +517,8 @@ function open_diff(entry, tag: string, color: Color3)
 	local token = {}
 	diff_token = token
 	local result, err
-	if tag == "DELETE" then
-		result = { [entry.key] = "" } -- file is gone on disk
+	if tag == "DELETE" or (entry.pull and not entry.exists) then
+		result = { [entry.key] = "" } -- no file on disk
 	else
 		result, err = request("POST", "/sources", { keys = { entry.key } })
 	end
@@ -530,10 +533,13 @@ function open_diff(entry, tag: string, color: Color3)
 
 	local inst = find(entry.path)
 	local studio = inst and inst:IsA("LuaSourceContainer") and inst.Source or ""
-	local edits = diff.lines(studio, disk)
+	local edits = if entry.pull then diff.lines(disk, studio) else diff.lines(studio, disk)
 	local added, removed = diff.count(edits)
 
-	if tag == "DELETE" then
+	if entry.pull then
+		diff_sub.Text = entry.exists and `{tag}  ·  +{added}  -{removed}  ·  red = file now, green = Studio`
+			or `{tag}  ·  new file, {added} lines from Studio`
+	elseif tag == "DELETE" then
 		diff_sub.Text = `DELETE  ·  file removed on disk, Apply removes these {removed} lines from Studio`
 	elseif added + removed == 0 then
 		diff_sub.Text = `{tag}  ·  same code, only Enabled changes (disabled on disk: {entry.disabled})`
@@ -864,6 +870,188 @@ local function show_review(plan)
 	widget.Enabled = true
 end
 
+-- pull: studio -> disk ----------------------
+
+local SCRIPT_CLASSES = { Script = true, LocalScript = true, ModuleScript = true }
+
+local function path_of(inst: Instance): { string }
+	local path = {}
+	local node = inst
+	while node and node ~= game do
+		table.insert(path, 1, node.Name)
+		node = node.Parent
+	end
+	return path
+end
+
+local function show_pull_review(plan, studio_only: number)
+	local count = #plan.create + #plan.update
+	local skipped = studio_only > 0 and ` {studio_only} Studio-only script(s) skipped (their folder isn't on disk).` or ""
+	if count == 0 then
+		pending = nil
+		set_status("ok", "Nothing to pull", `Your files already match Studio.{skipped}`)
+	else
+		pending = plan
+		set_status(
+			"review",
+			count == 1 and "1 script to write to disk" or `{count} scripts to write to disk`,
+			`Studio → your files. Click one to see the diff. No file is deleted.{skipped}`
+		)
+	end
+	show_plan(plan)
+	refresh_buttons()
+end
+
+-- compares studio scripts under the mapped roots with the files, asks the server (dry run) what it may write
+local function start_pull()
+	set_status("busy", "Reading Studio…", "Looking for scripts that differ from your files.")
+	local snapshot, err = request("GET", "/snapshot")
+	if not snapshot then
+		set_status("error", "Lost the server", tostring(err))
+		return
+	end
+	local by_key = {}
+	for _, entry in snapshot.entries do
+		by_key[entry.key] = entry
+	end
+	local roots = {}
+	for _, root_path in snapshot.roots or {} do
+		roots[table.concat(root_path, "/")] = true
+	end
+
+	local plan = { create = {}, update = {}, conflicts = {}, skip = {}, models_changed = {}, remove = {}, pull = true }
+	local candidates, seen, new_keys = {}, {}, {}
+	local scanned = 0
+	for _, root_path in snapshot.roots or {} do
+		local root_inst = find(root_path)
+		for _, inst in root_inst and root_inst:GetDescendants() or {} do
+			scanned += 1
+			if scanned % 500 == 0 then
+				task.wait()
+			end
+			if not SCRIPT_CLASSES[inst.ClassName] then
+				continue
+			end
+			local path = path_of(inst)
+			local key = table.concat(path, "/")
+			if seen[key] then
+				continue -- nested roots see it twice, or two siblings share a name
+			end
+			seen[key] = true
+
+			local entry = by_key[key]
+			local current = checksum(inst.Source)
+			local item = { key = key, path = path, class = inst.ClassName, pull = true, exists = entry ~= nil }
+			if inst:IsA("BaseScript") then
+				item.disabled = not inst.Enabled
+			end
+			if entry then
+				if entry.folder or entry.model or entry.data or current == entry.hash then
+					continue
+				end
+				local last = known_hash[key]
+				if last and current == last then
+					continue -- studio untouched since our last sync: the file is newer, push brings it in
+				elseif last and entry.hash ~= last then
+					table.insert(plan.conflicts, item) -- edited in studio and on disk
+					continue
+				end
+			else
+				new_keys[key] = true
+			end
+			table.insert(candidates, item)
+		end
+	end
+
+	-- new scripts only where their parent is on disk (or is a new script that will be)
+	local studio_only = 0
+	local filtered = {}
+	for _, item in candidates do
+		if item.exists then
+			table.insert(filtered, item)
+			continue
+		end
+		local parent_key = table.concat(item.path, "/", 1, #item.path - 1)
+		local parent = by_key[parent_key]
+		if roots[parent_key] or new_keys[parent_key] or (parent and not parent.model) then
+			for other in new_keys do
+				if other:sub(1, #item.key + 1) == item.key .. "/" then
+					item.has_children = true
+					break
+				end
+			end
+			table.insert(filtered, item)
+		else
+			studio_only += 1
+		end
+	end
+
+	local verdict, verdict_err = request("POST", "/pull", { dry = true, items = filtered })
+	if not verdict then
+		set_status("error", "Pull failed", tostring(verdict_err))
+		return
+	end
+	for _, item in filtered do
+		local reason = verdict.refused and verdict.refused[item.key]
+		if reason then
+			if reason:find("Studio-only") then
+				studio_only += 1
+			else
+				item.reason = reason
+				table.insert(plan.skip, item)
+			end
+		elseif verdict.written and verdict.written[item.key] then
+			table.insert(item.exists and plan.update or plan.create, item)
+		end
+	end
+	show_pull_review(plan, studio_only)
+end
+
+local function apply_pull(plan)
+	local todo = {}
+	for _, group in { plan.update, plan.create } do
+		for _, item in group do
+			local inst = find(item.path)
+			if inst and inst:IsA("LuaSourceContainer") then
+				item.source = inst.Source -- read now, not at review time
+				table.insert(todo, item)
+			end
+		end
+	end
+	table.sort(todo, function(a, b)
+		return #a.path < #b.path
+	end)
+
+	local written, refused = 0, 0
+	for i = 1, #todo, SOURCE_BATCH do
+		local chunk = table.move(todo, i, math.min(i + SOURCE_BATCH - 1, #todo), 1, {})
+		local result, err = request("POST", "/pull", { dry = false, items = chunk })
+		if not result then
+			set_status("error", "Pull failed", `Wrote {written} file(s) before the server stopped answering.\n{err}`)
+			return false
+		end
+		for _, item in chunk do
+			if result.written and result.written[item.key] then
+				written += 1
+				known_hash[item.key] = checksum(item.source)
+			else
+				refused += 1
+				warn(`[xenon] not written {item.key}: {result.refused and result.refused[item.key] or "?"}`)
+			end
+		end
+	end
+	log(`pulled {written} script(s) to disk, {refused} refused, deleted 0`)
+	pending = nil
+	set_status(
+		"ok",
+		`Wrote {written} file{written == 1 and "" or "s"}`,
+		refused > 0 and `{refused} could not be written, see Output.` or "Your files now match Studio. Check them with git diff."
+	)
+	show_plan(plan)
+	refresh_buttons()
+	return true
+end
+
 -- connection ----------------------------------
 
 local poll_loop
@@ -1106,7 +1294,13 @@ settings_button.MouseButton1Click:Connect(function()
 end)
 
 primary_button.MouseButton1Click:Connect(function()
-	if pending then
+	if pending and pending.pull then
+		local plan = pending
+		pending = nil
+		refresh_buttons()
+		set_status("busy", "Writing files…", "")
+		apply_pull(plan)
+	elseif pending then
 		local plan = pending
 		pending = nil
 		refresh_buttons()
@@ -1122,6 +1316,12 @@ primary_button.MouseButton1Click:Connect(function()
 end)
 
 secondary_button.MouseButton1Click:Connect(function()
+	if not pending then
+		if connected then
+			start_pull()
+		end
+		return
+	end
 	pending = nil
 	set_status("ok", "Skipped", "Those changes were not applied. New edits will still come in.")
 	clear_list()

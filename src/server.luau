@@ -18,6 +18,7 @@ local task = require("@lune/task")
 -- MODULES -------------------------
 
 local mapping = require("./mapping")
+local pull = require("./pull")
 
 
 -- VARIABLES -------------------------
@@ -52,6 +53,7 @@ local function public(entry, with_source: boolean?)
 		disabled = entry.disabled,
 		folder = entry.folder,
 		model = entry.model ~= nil or nil,
+		data = entry.data,
 		source = with_source and entry.source or nil,
 		tree = with_source and entry.model or nil,
 	}
@@ -118,7 +120,11 @@ local function handle(request)
 			end
 			return a.key < b.key
 		end)
-		return json({ version = version, session = session, entries = list })
+		local roots = {}
+		for _, root in project.roots do
+			table.insert(roots, root.path)
+		end
+		return json({ version = version, session = session, roots = roots, entries = list })
 	end
 
 	if path == "/sources" and request.method == "POST" then
@@ -135,6 +141,25 @@ local function handle(request)
 			end
 		end
 		return json(out)
+	end
+
+	if path == "/pull" and request.method == "POST" then
+		local ok, body = pcall(serde.decode, "json", request.body)
+		if not ok or type(body) ~= "table" or type(body.items) ~= "table" then
+			return json({ error = "expected { items = [...], dry = bool }" }, 400)
+		end
+		local result = pull.run(project, current, body.items, body.dry == true)
+		if not body.dry then
+			local count = 0
+			for key, file in result.written do
+				count += 1
+				print(`[xenon] pulled {key} -> {file}`)
+			end
+			if count > 0 then
+				rescan() -- written files show up as changes with studio's hash, so nothing bounces back
+			end
+		end
+		return json(result)
 	end
 
 	if path == "/changes" then

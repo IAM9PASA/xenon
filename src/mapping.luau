@@ -126,6 +126,7 @@ local function push_script(out, path, class, file, meta, cache, source_override)
 		hash = item.hash,
 		disabled = disabled,
 		file = file,
+		data = source_override ~= nil or nil, -- generated from .json / .toml: never pulled back
 	})
 end
 
@@ -215,6 +216,7 @@ function scan_folder(dir: string, path: { string }, out, cache, class_name: stri
 		local init_file = dir .. "/init" .. pair[1]
 		if fs.isFile(init_file) then
 			push_script(out, path, pair[2], init_file, meta, cache)
+			out[#out].dir = dir -- children of this script live in this folder
 			scan(dir, path, out, cache)
 			return
 		end
@@ -225,6 +227,7 @@ function scan_folder(dir: string, path: { string }, out, cache, class_name: stri
 		path = path,
 		class = class_name or (meta and meta.className) or "Folder",
 		folder = true,
+		dir = dir,
 	})
 	scan(dir, path, out, cache)
 end
@@ -278,7 +281,7 @@ function mapping.load_project(project_file: string)
 	end
 	walk(project.tree, {})
 
-	return { name = project.name or "project", place_ids = project.placeIds or {}, roots = roots }
+	return { name = project.name or "project", place_ids = project.placeIds or {}, roots = roots, base_dir = base_dir }
 end
 
 -- everything under the mapped roots, parents before children

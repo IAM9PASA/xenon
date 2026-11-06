@@ -2,7 +2,7 @@
 
 # Xenon
 
-**Safe file sync for Roblox: disk → Studio. It only deletes scripts you delete on disk, nothing else.**
+**Safe file sync for Roblox: disk → Studio, plus Pull from Studio for scripts. It only deletes scripts you delete on disk, nothing else.**
 
 You write code in your editor, Xenon puts it into Roblox Studio within about a second.
 Built because Argon wanted to delete 1,386 Studio-only things (UI, models) from our game.
@@ -77,8 +77,21 @@ Check it works: `xenon version`
 - **Click a script** in the list to see its **diff**: red lines = Studio now, green = what disk will put in. Unchanged parts are folded. **Back** returns
 - **● Live** in the header = the server answers. **● Reconnecting…** = it doesn't; Xenon keeps trying and catches up by itself (also after you restart `xenon serve`), no need to Disconnect / Connect
 - **One button** that changes: **Connect** → **Apply** / **Cancel** → **Disconnect**
+- **Pull from Studio** (next to Disconnect) copies Studio scripts back into your files, see below
 
 </td></tr></table>
+
+### Pull from Studio (Studio → files)
+
+Edited scripts in Studio, or made new ones? Press **Pull from Studio**:
+
+1. Xenon lists every script that differs from your files: `TO DISK` (file will be overwritten with the Studio code) and `NEW FILE` (a file will be created)
+2. Click one to see the diff (red = file now, green = Studio)
+3. Press **Write to disk**. Check with `git diff`, git is your undo here
+
+It only writes scripts. It never deletes, renames or moves a file, never overwrites a file when creating one, and never writes into Wally packages or `.json` / `.toml` data files.
+New scripts are only written where their parent folder is already on disk; scripts inside Studio-only things (models, tools, UI not in `src`) are skipped and counted.
+A script with child scripts becomes `Name/init.server.luau` with the children inside. Disabled scripts get a `.meta.json`.
 
 ### Settings
 
@@ -174,7 +187,7 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 ## Development
 
 ```
-xenon test      # mapping, wally and diff tests
+xenon test      # mapping, wally, diff and pull tests
 xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 ```
 
@@ -186,14 +199,15 @@ xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 | `src/model.luau` | `.rbxm` / `.model.json` / `.txt` → JSON trees, `.json` / `.toml` → modules |
 | `src/checksum.luau` | same hash on server and plugin |
 | `src/diff.luau` | line diff for the review page (Myers) |
+| `src/pull.luau` | Studio → disk rules: where a pulled script goes, what is refused |
 | `src/server.luau` | watches files, HTTP API on localhost |
 | `src/build.luau` | packs the plugin into `Xenon.rbxm` |
 | `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
-| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau` |
+| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau` |
 | `docs/AI.md` | full spec for AI assistants |
 
 Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.
 
 ## Not yet
 
-Studio → disk (pull), live long-polling, deleting folders or models (on purpose).
+Pulling models / UI (scripts only for now), live long-polling, deleting folders or models (on purpose).

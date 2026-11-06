@@ -21,6 +21,7 @@ Machine-oriented reference. Every fact here matches the code in this repo (v0.3.
 | I6 | If `placeIds` is non-empty and `game.PlaceId` (non-zero) is not in it, the plugin refuses to sync. |
 | I7 | Every apply is one ChangeHistory recording named `Xenon sync` (one Ctrl+Z). |
 | I8 | The server has no endpoint that requests deletion. File removals are reported as `kind = "remove"` changes; the plugin decides under I1. |
+| I10 | Pull (Studio → disk) writes only `.luau` script files and `.meta.json` for disabled new scripts. It MUST NOT delete, rename or move files, MUST NOT overwrite when creating (any `Name.*` or `Name/` taken → refuse), MUST NOT write outside `project.base_dir`, inside a folder with `default.project.json` or `_Index` (Wally), or to entries with `data = true` (.json/.toml). New files only under a folder that exists on disk (`entry.dir` or a root dir). Every non-dry pull is followed by `rescan()`. |
 | I9 | Never store secrets (API keys) in the repo. Asphalt reads `ASPHALT_API_KEY` from the environment. |
 
 ## 3. Architecture
@@ -45,6 +46,7 @@ Studio plugin ── polls /changes every poll_seconds ──► plan (create/up
 | `src/mapping.luau` | `load_project(file)`, `snapshot(project, cache)`. Turns files into entries (section 5). |
 | `src/model.luau` | `from_rbxm`, `from_model_json`, `from_text`, `from_instances` → instance trees (section 6); `data_module(contents, "json"|"toml")` → Luau source. |
 | `src/checksum.luau` | `checksum(source) -> "<length> <hash>"`. CRLF → LF first. Rolling hash `h = (h*31 + byte) % 1000000007`. Same code runs in the plugin. |
+| `src/pull.luau` | `pull.run(project, current, items, dry) -> { written = {key -> file}, refused = {key -> reason} }`. All Studio → disk rules (I10). Tested in `tests/pull_test.luau`. |
 | `src/diff.luau` | `diff.lines(old, new)` Myers line diff (common prefix/suffix trimmed, > 1000 edits → shown as full replace), `diff.fold(edits, context)`, `diff.count(edits)`. Pure Luau, used by the plugin's diff page, tested in `tests/diff_test.luau`. |
 | `src/build.luau` | Packs `plugin/xenon_plugin.luau` (Script "Xenon") + `src/checksum.luau` and `src/diff.luau` (child ModuleScripts "checksum", "diff") into `Xenon.rbxm`, copies it to `%LOCALAPPDATA%/Roblox/Plugins/`. |
 | `plugin/xenon_plugin.luau` | Studio side: UI (main, settings and diff pages, Live indicator), HTTP client, plan, apply, model builder, live poll. |
@@ -153,8 +155,9 @@ All responses are JSON. Errors: `{ "error": "..." }` with 400 / 404 / 500.
 | Method + path | Request | Response |
 | --- | --- | --- |
 | `GET /info` | — | `{ name, placeIds: number[], version: number, session: string, scripts: number }` |
-| `GET /snapshot` | — | `{ version, session, entries: PublicEntry[] }` (no sources/trees) |
+| `GET /snapshot` | — | `{ version, session, roots: string[][], entries: PublicEntry[] }` (no sources/trees). PublicEntry has `data = true` for .json/.toml modules. |
 | `POST /sources` | `{ keys: string[] }` | `{ [key]: string (script source) or table (model tree) }` |
+| `POST /pull` | `{ dry: bool, items: [{ key, path, class, source?, has_children?, disabled? }] }` | `{ written: {key: file}, refused: {key: reason} }`. dry = decide only. Non-dry writes, then rescans. |
 | `GET /changes?since=N` | — | `{ version, session, changes: Change[] }` or `{ version, session, resync: true, changes: [] }` when N is older than the log **or newer than `version`** (server restarted) |
 
 ```lua
@@ -184,6 +187,8 @@ Change = { version: number, kind: "create" | "update" | "remove", entry: PublicE
 **poll_loop():** every `poll_seconds` one request: `/info` while a plan waits for Apply (heartbeat only), else `/changes`. Request fails → Live indicator "Reconnecting…" (once). Server back after a drop, `session` changed, or `resync` → `full_sync` (replaces a pending plan). While pending nothing else happens. `remove` changes → `plan_removals` (I1), others → `plan_for(live = true)` → review if conflicts / auto_apply off / count > auto_apply_limit, else apply directly.
 
 **UI states** (dot color / big line): off grey "Not connected"; busy blue "Connecting…" "Comparing…" "Applying…"; ok green "In sync" / "Skipped"; review yellow "N changes ready"; error red "Server not running" / "Lost the server" / "Wrong place" / "Apply failed". Primary button: Connect → Apply (with Cancel) → Disconnect.
+
+**start_pull():** `GET /snapshot` → every LuaSourceContainer under the root instances (first of duplicate keys only) → existing entry: skip if folder/model/data/same hash, skip if `known_hash` equals Studio (file is newer), conflict if Studio and file both changed since `known_hash`; new: keep only if parent key is a root, an entry (not model) or another new script (sets `has_children`), else counted Studio-only → `POST /pull dry` → plan `{update = TO DISK, create = NEW FILE, conflicts, skip = refused with reason, pull = true}` → review (button "Write to disk"). **apply_pull():** re-reads `Source` now, sorted by depth, batches of 80 → `POST /pull` → `known_hash[key] = checksum(source)` for written ones. Diff page for pull rows is file (old) → Studio (new).
 
 **plan_removals(plan, removed):** live `remove` changes (last change per key wins, so delete + re-create is an update) → `plan.remove` or `plan.conflicts` per I1. Counts toward the auto-apply limit like creates/updates. `apply` runs `remove_scripts` first, deepest path first.
 
@@ -222,7 +227,7 @@ Stored with `plugin:SetSetting("xenon_settings", table)`. Defined in `SETTING_LI
 
 ## 12. Known limits / not implemented
 
-- No Studio → disk (pull), no two-way sync, no folder/model deletes (by design, I1/I8). Files deleted while the server was down are not detected (full sync never deletes).
+- Pull is scripts only (no models / UI / properties), user-triggered, no automatic two-way sync. No folder/model deletes (by design, I1/I8). Files deleted while the server was down are not detected (full sync never deletes).
 - Detection latency up to ~1.5 s (1 s server rescan + poll). Long-polling is the planned fix.
 - `.md`, `.csv`, `.png` and other files are ignored. Terrain, unions (CSG) and binary data in models are not supported (same as Argon).
 - Studio MCP `execute_luau` cannot reach localhost (Assistant HTTP allowlist), so the plugin can't be driven from MCP; test plugin logic by copying functions into an `execute_luau` call.

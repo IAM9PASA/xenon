@@ -29,9 +29,24 @@ local version = 0
 local known_hash = {} -- key -> hash studio had when xenon last synced it (conflict check)
 local pending = nil -- plan waiting for Apply
 
+-- toolbar icon: a decal id (user's choice). toolbar icons need the decal's image id, resolved at startup
+local ICON_DECAL_ID = 57445653
+
 local toolbar = plugin:CreateToolbar("Xenon")
 local toggle_button = toolbar:CreateButton("Xenon", "Sync scripts from disk (never deletes)", "")
 toggle_button.ClickableWhenViewportHidden = true
+
+task.spawn(function()
+	local ok, objects = pcall(function()
+		return game:GetObjects(`rbxassetid://{ICON_DECAL_ID}`)
+	end)
+	local decal = ok and objects and objects[1]
+	if decal and decal:IsA("Decal") and decal.Texture ~= "" then
+		toggle_button.Icon = decal.Texture
+	else
+		warn(`[xenon] could not load icon decal {ICON_DECAL_ID}`)
+	end
+end)
 
 local widget = plugin:CreateDockWidgetPluginGui(
 	"Xenon",

@@ -76,6 +76,7 @@ Check it works: `xenon version`
 
 - **Click a script** in the list to see its **diff**: red lines = Studio now, green = what disk will put in. Unchanged parts are folded. **Back** returns
 - **● Live** in the header = the server answers. **● Reconnecting…** = it doesn't; Xenon keeps trying and catches up by itself (also after you restart `xenon serve`), no need to Disconnect / Connect
+- **Auto ON / OFF** (next to the big line): on = Xenon never asks, everything is applied right away, also on Connect. Edited-in-both-places scripts are still left alone. Turning it on while a review waits applies that review. Pull from Studio still asks, because it writes files
 - **One button** that changes: **Connect** → **Apply** / **Cancel** → **Disconnect**
 - **Pull from Studio** (next to Disconnect) copies Studio scripts back into your files, see below
 
@@ -99,6 +100,7 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| Auto-accept (never ask) | Off | On = every change goes in without Apply, also on Connect. Same as the **Auto** button. Conflicts are still left alone |
 | Server port | `34872` | Must match `xenon serve --port` |
 | Apply small changes automatically | On | Off = every change waits for Apply |
 | Ask first above this many changes | `20` | Bigger batches always wait for Apply |

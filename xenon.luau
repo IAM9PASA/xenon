@@ -12,7 +12,7 @@ local process = require("@lune/process")
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.6.1"
+local VERSION = "0.7.0"
 local DEFAULT_PORT = 34872
 
 local args = process.args

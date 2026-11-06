@@ -24,6 +24,7 @@ local SETTINGS_KEY = "xenon_settings"
 
 -- every setting the Settings page shows. order = page order
 local SETTING_LIST = {
+	{ key = "auto_accept", label = "Auto-accept (never ask)", hint = "Every change goes in without Apply, also on Connect. Conflicts are still left alone", kind = "bool", default = false },
 	{ key = "port", label = "Server port", hint = "Must match `xenon serve --port` (default 34872)", kind = "number", default = 34872, min = 1, max = 65535 },
 	{ key = "auto_apply", label = "Apply small changes automatically", hint = "Off = every change waits for Apply", kind = "bool", default = true },
 	{ key = "auto_apply_limit", label = "Ask first above this many changes", hint = "Bigger batches always wait for Apply", kind = "number", default = 20, min = 1, max = 5000 },
@@ -176,7 +177,19 @@ corner(settings_button)
 
 -- main page
 local main_page = make("Frame", { Position = UDim2.fromOffset(0, 36), Size = UDim2.new(1, 0, 1, -36), BackgroundTransparency = 1 }, root)
-local summary = text({ Size = UDim2.new(1, 0, 0, 30), Font = Enum.Font.BuilderSansBold, TextSize = 24, Text = "Not connected" }, main_page)
+local summary = text({ Size = UDim2.new(1, -84, 0, 30), Font = Enum.Font.BuilderSansBold, TextSize = 24, Text = "Not connected", TextTruncate = Enum.TextTruncate.AtEnd }, main_page)
+-- one-click auto-accept switch (same as the setting)
+local auto_button = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 2),
+	Size = UDim2.fromOffset(78, 26),
+	BorderSizePixel = 0,
+	Font = Enum.Font.BuilderSansBold,
+	TextSize = 13,
+	TextColor3 = Color3.new(1, 1, 1),
+	Text = "Auto",
+}, main_page)
+corner(auto_button, 13)
 local hint = text({ Position = UDim2.fromOffset(0, 32), Size = UDim2.new(1, 0, 0, 38), TextSize = 14, TextColor3 = COLOR.dim, TextYAlignment = Enum.TextYAlignment.Top, Text = "" }, main_page)
 
 local chips = make("Frame", { Position = UDim2.fromOffset(0, 74), Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1 }, main_page)
@@ -872,7 +885,13 @@ end
 
 local function show_in_sync(plan)
 	pending = nil
-	set_status("ok", "In sync", "Studio matches the files on disk. Edits you save will show up here automatically.")
+	local kept = #plan.conflicts
+	set_status(
+		"ok",
+		"In sync",
+		kept > 0 and `{kept} script(s) edited in Studio and on disk were left alone (red). Everything else is in.`
+			or "Studio matches the files on disk. Edits you save will show up here automatically."
+	)
 	show_plan(plan)
 	refresh_buttons()
 end
@@ -1074,6 +1093,35 @@ local function apply_pull(plan)
 	return true
 end
 
+-- auto-accept on: apply now. off: review when asked to. conflicts are never applied either way
+local function apply_or_review(plan, needs_review: boolean)
+	local count = #plan.create + #plan.update + #plan.remove
+	if needs_review and not settings.auto_accept and count > 0 then
+		show_review(plan)
+	elseif count == 0 or apply(plan) then
+		show_in_sync(plan)
+	end
+end
+
+local function paint_auto()
+	auto_button.Text = settings.auto_accept and "Auto  ON" or "Auto  OFF"
+	auto_button.BackgroundColor3 = settings.auto_accept and COLOR.green or COLOR.grey
+end
+
+local function set_auto(on: boolean)
+	settings.auto_accept = on
+	save_settings()
+	paint_auto()
+	-- turning it on while a sync review waits: apply it now (pull reviews still wait, they write files)
+	if on and pending and not pending.pull then
+		local plan = pending
+		pending = nil
+		refresh_buttons()
+		set_status("busy", "Applying…", "")
+		apply_or_review(plan, false)
+	end
+end
+
 -- connection ----------------------------------
 
 local poll_loop
@@ -1092,11 +1140,7 @@ local function full_sync()
 	set_live("live")
 	set_status("busy", "Comparing…", `Checking {#snapshot.entries} files against Studio.`)
 	local plan = plan_for(snapshot.entries, false)
-	if #plan.create + #plan.update == 0 then
-		show_in_sync(plan)
-	else
-		show_review(plan)
-	end
+	apply_or_review(plan, true) -- connect / resync always asks, unless auto-accept
 	return true
 end
 
@@ -1194,10 +1238,8 @@ function poll_loop(my_id: number)
 			plan_removals(plan, removed)
 			local count = #plan.create + #plan.update + #plan.remove
 			local needs_review = #plan.conflicts > 0 or not settings.auto_apply or count > settings.auto_apply_limit
-			if needs_review and (count > 0 or #plan.conflicts > 0) then
-				show_review(plan)
-			elseif count > 0 and apply(plan) then
-				show_in_sync(plan)
+			if count > 0 or #plan.conflicts > 0 then
+				apply_or_review(plan, needs_review)
 			end
 		end
 	end
@@ -1236,8 +1278,12 @@ local function build_settings_page()
 			end
 			paint()
 			toggle.MouseButton1Click:Connect(function()
-				settings[item.key] = not settings[item.key]
-				save_settings()
+				if item.key == "auto_accept" then
+					set_auto(not settings.auto_accept)
+				else
+					settings[item.key] = not settings[item.key]
+					save_settings()
+				end
 				paint()
 			end)
 		else
@@ -1305,6 +1351,10 @@ end
 
 load_settings()
 task.spawn(load_icon)
+paint_auto()
+auto_button.MouseButton1Click:Connect(function()
+	set_auto(not settings.auto_accept)
+end)
 
 toggle_button.Click:Connect(function()
 	widget.Enabled = not widget.Enabled

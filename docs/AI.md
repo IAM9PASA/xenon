@@ -15,7 +15,7 @@ Machine-oriented reference. Every fact here matches the code in this repo (v0.3.
 | --- | --- |
 | I1 | The only removal: `remove_scripts` sets `Parent = nil` (undoable, inside the recording) on a script whose file got a live `remove` change, when ALL hold: setting `sync_deletes` on, instance is a LuaSourceContainer of the entry's class, `checksum(Source) == entry.hash` (not edited in Studio, checked at plan and again at apply), no children. Otherwise it becomes a conflict / is kept. Full sync never removes. Folders, models and any other instance are never removed. No `Destroy` / `ClearAllChildren` anywhere. |
 | I2 | Scripts are created or updated only when the checksum differs (or `Enabled` differs). |
-| I3 | The first sync after Connect, any batch with a conflict, and live batches above `auto_apply_limit` (or any batch when `auto_apply` is off) MUST wait for the user's Apply. |
+| I3 | The first sync after Connect, any batch with a conflict, and live batches above `auto_apply_limit` (or any batch when `auto_apply` is off) MUST wait for the user's Apply. Exception: setting `auto_accept` (default off, user's choice) applies every sync plan immediately, including the first one; conflicts are still never applied. Pull reviews always wait. |
 | I4 | A script edited in Studio since Xenon last synced it, and also changed on disk, is a conflict and MUST NOT be overwritten. |
 | I5 | Models (`.rbxm`, `.rbxmx`, `.model.json`, `.txt`) are create-only. Existing ones are never replaced; changes are reported (`models_changed`). |
 | I6 | If `placeIds` is non-empty and `game.PlaceId` (non-zero) is not in it, the plugin refuses to sync. |
@@ -171,6 +171,8 @@ Change = { version: number, kind: "create" | "update" | "remove", entry: PublicE
 
 ## 8. Plugin algorithms (`plugin/xenon_plugin.luau`)
 
+**apply_or_review(plan, needs_review):** the single decision point for full sync (needs_review = true) and live batches. Review only if needs_review and not `auto_accept` and there is something to apply; else apply (conflicts excluded) → "In sync" (status mentions kept conflicts).
+
 **connect():** `GET /info` → place check (I6) → `full_sync()` → start `poll_loop(loop_id)` (always, even if the first sync failed). `loop_id` bumps on connect/disconnect so an old loop exits.
 
 **full_sync():** `GET /snapshot` → `plan_for(entries, live = false)` → nothing to do: "In sync"; else `show_review` (waits for Apply, I3).
@@ -204,6 +206,7 @@ Stored with `plugin:SetSetting("xenon_settings", table)`. Defined in `SETTING_LI
 | `port` | number | 34872 | 1-65535, must match `xenon serve --port` |
 | `auto_apply` | bool | true | apply small live batches without asking |
 | `auto_apply_limit` | number | 20 | 1-5000, larger live batches wait for Apply |
+| `auto_accept` | bool | false | — |
 | `sync_deletes` | bool | true | — |
 | `poll_seconds` | number | 0.5 | 0.1-10 |
 | `sync_models` | bool | true | include `.rbxm` / `.model.json` / `.txt` entries |

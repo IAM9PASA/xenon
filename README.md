@@ -2,8 +2,21 @@
 
 Safe script sync for Roblox: disk -> Studio. Built because Argon deletes Studio-only content.
 
-Rules (v1):
-- scripts only (Script / LocalScript / ModuleScript) + their containers
+File types (same rules as Rojo / Argon, so Wally packages work):
+
+| File | Becomes |
+| --- | --- |
+| `.server.luau` / `.client.luau` / `.luau` (or `.lua`) | Script / LocalScript / ModuleScript |
+| `Folder/init.*.luau`, `init.meta.json`, `Name.meta.json` | folder is the script / className / Disabled |
+| `Folder/default.project.json` | nested project (every Wally package in `_Index`) |
+| `.rbxm` / `.rbxmx` / `.model.json` | model, built by the plugin (meshes via AssetService, refs rewired) |
+| `.json` / `.toml` | ModuleScript returning the data |
+| `.txt` | StringValue |
+
+Wally: map `Packages` / `ServerPackages` in `default.project.json`, run `wally install`, Xenon picks them up.
+
+Rules:
+- scripts are created and updated; models are only created when missing (tagged `xenon_hash`, disk changes reported)
 - never deletes anything in Studio. Files removed on disk are only reported
 - checksum on both sides: only scripts whose code really differs are sent
 - shows the plan first (create / update / conflicts / delete 0), applies on Apply

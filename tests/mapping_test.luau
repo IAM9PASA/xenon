@@ -65,8 +65,10 @@ check("module", by_key["ServerScriptService/util"] and by_key["ServerScriptServi
 check("meta disabled", by_key["ServerScriptService/off"] and by_key["ServerScriptService/off"].disabled == true)
 check("--disable line", by_key["ServerScriptService/flagged"] and by_key["ServerScriptService/flagged"].disabled == true)
 check("enabled by default", by_key["ServerScriptService/main"].disabled == false)
-check("json ignored", by_key["ServerScriptService/data"] == nil)
-check("rbxm ignored", by_key["ServerScriptService/model"] == nil)
+check("json -> data module", by_key["ServerScriptService/data"] and by_key["ServerScriptService/data"].class == "ModuleScript")
+check("broken rbxm skipped, no crash", by_key["ServerScriptService/model"] == nil)
+check("txt -> StringValue", by_key["StarterPlayer/StarterPlayerScripts/empty/readme"] and by_key["StarterPlayer/StarterPlayerScripts/empty/readme"].class == "StringValue")
+check("meta.json never an instance", by_key["ServerScriptService/off.meta"] == nil and by_key["ServerScriptService/off"].class == "Script")
 local hud = by_key["StarterPlayer/StarterPlayerScripts/hud"]
 check("init.client -> folder is LocalScript", hud and hud.class == "LocalScript")
 check("crlf normalized", hud and not hud.source:find("\r", 1, true))

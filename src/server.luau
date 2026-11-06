@@ -6,6 +6,7 @@
 --   POST /sources {keys}    { [key] = source }
 --   GET  /changes?since=N   { version, resync?, changes = [{ version, kind, entry(+source) }] }
 -- there is no delete endpoint: removed files are reported as "remove" and the plugin keeps the instance
+-- models (.rbxm / .model.json / .txt) come back from /sources as instance trees, scripts as source strings
 
 -- SERVICES -------------------------
 
@@ -52,7 +53,9 @@ local function public(entry, with_source: boolean?)
 		hash = entry.hash,
 		disabled = entry.disabled,
 		folder = entry.folder,
+		model = entry.model ~= nil or nil,
 		source = with_source and entry.source or nil,
+		tree = with_source and entry.model or nil,
 	}
 end
 
@@ -125,11 +128,12 @@ local function handle(request)
 		if not ok or type(body) ~= "table" or type(body.keys) ~= "table" then
 			return json({ error = "expected { keys = [...] }" }, 400)
 		end
+		-- scripts -> source string, models -> instance tree table
 		local out = {}
 		for _, key in body.keys do
 			local entry = current[key]
-			if entry and entry.source then
-				out[key] = entry.source
+			if entry then
+				out[key] = entry.source or entry.model
 			end
 		end
 		return json(out)

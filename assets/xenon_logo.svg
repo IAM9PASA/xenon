@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Xenon logo: original artwork. A geometric X whose rising stroke ends in a sync arrow,
+       lit in xenon's blue-violet gas-discharge glow on a dark rounded tile. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1a3d"/>
+      <stop offset="1" stop-color="#0b0a1c"/>
+    </linearGradient>
+    <radialGradient id="discharge" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7d5cff" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#4b3bd6" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#2a2080" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gas" gradientUnits="userSpaceOnUse" x1="140" y1="372" x2="372" y2="140">
+      <stop offset="0" stop-color="#5fe3ff"/>
+      <stop offset="0.5" stop-color="#8c86ff"/>
+      <stop offset="1" stop-color="#d590ff"/>
+    </linearGradient>
+    <linearGradient id="gas2" gradientUnits="userSpaceOnUse" x1="140" y1="140" x2="372" y2="372">
+      <stop offset="0" stop-color="#a98bff"/>
+      <stop offset="1" stop-color="#6f8dff"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d08cff"/>
+      <stop offset="1" stop-color="#5fe3ff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <clipPath id="tileclip"><rect x="16" y="16" width="480" height="480" rx="112"/></clipPath>
+    <!-- cuts a gap in the falling stroke where the rising stroke passes over it -->
+    <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#fff"/>
+      <line x1="120" y1="392" x2="392" y2="120" stroke="#000" stroke-width="100"/>
+    </mask>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#tile)"/>
+  <g clip-path="url(#tileclip)">
+    <circle cx="256" cy="256" r="250" fill="url(#discharge)"/>
+    <circle cx="256" cy="256" r="196" fill="none" stroke="url(#ring)" stroke-width="8" stroke-opacity="0.35"/>
+    <circle cx="256" cy="256" r="196" fill="none" stroke="url(#ring)" stroke-width="22" stroke-opacity="0.18" filter="url(#glow)"/>
+  </g>
+  <rect x="17.5" y="17.5" width="477" height="477" rx="110.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+
+  <!-- glow halo -->
+  <g stroke="#9a7bff" fill="#9a7bff" opacity="0.8" filter="url(#glow)">
+    <line x1="150" y1="150" x2="362" y2="362" stroke-width="62" stroke-linecap="round"/>
+    <line x1="150" y1="362" x2="300" y2="212" stroke-width="62" stroke-linecap="round"/>
+    <polygon points="374,138 354,240 272,158" stroke-width="16" stroke-linejoin="round"/>
+  </g>
+
+  <!-- falling stroke (behind) -->
+  <g mask="url(#gap)">
+    <line x1="150" y1="150" x2="362" y2="362" stroke="url(#gas2)" stroke-width="62" stroke-linecap="round"/>
+    <line x1="150" y1="150" x2="362" y2="362" stroke="#ffffff" stroke-opacity="0.3" stroke-width="14" stroke-linecap="round"/>
+  </g>
+
+  <!-- rising stroke with sync arrowhead (front) -->
+  <line x1="150" y1="362" x2="300" y2="212" stroke="url(#gas)" stroke-width="62" stroke-linecap="round"/>
+  <polygon points="374,138 354,240 272,158" fill="url(#gas)" stroke="url(#gas)" stroke-width="16" stroke-linejoin="round"/>
+  <line x1="150" y1="362" x2="300" y2="212" stroke="#ffffff" stroke-opacity="0.4" stroke-width="14" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,18 @@
+#:schema https://raw.githubusercontent.com/jackTabsCode/asphalt/refs/tags/v2.0.2/schema.json
+# Asphalt v2 config: uploads the Xenon logo PNGs to Roblox.
+# The Open Cloud API key is NOT stored here. Set it in your shell:
+#   ASPHALT_API_KEY=<your key>   (needs asset:read + asset:write, owned by this user)
+# Then run: asphalt sync
+# Uploaded ids are written to asphalt.lock.toml (commit it) and to assets/logo.luau.
+
+[creator]
+type = "user"
+id = 1316704411
+
+[codegen]
+style = "flat"
+strip_extensions = true
+
+[inputs.logo]
+path = "assets/*.png"
+output_path = "assets"

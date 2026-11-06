@@ -6,6 +6,9 @@
 local HttpService = game:GetService("HttpService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ScriptEditorService = game:GetService("ScriptEditorService")
+local AssetService = game:GetService("AssetService")
+local InsertService = game:GetService("InsertService")
+local CollectionService = game:GetService("CollectionService")
 
 
 -- MODULES -------------------------
@@ -136,8 +139,9 @@ end
 
 local function fetch_sources(entries)
 	local keys = {}
+	-- scripts come back as source strings, models as instance trees
 	for _, entry in entries do
-		if not entry.folder and not entry.source then
+		if not entry.folder and not entry.source and not entry.tree then
 			table.insert(keys, entry.key)
 		end
 	end
@@ -153,8 +157,8 @@ local function fetch_sources(entries)
 		end
 	end
 	for _, entry in entries do
-		if entry.source then
-			sources[entry.key] = entry.source
+		if entry.source or entry.tree then
+			sources[entry.key] = entry.source or entry.tree
 		end
 	end
 	return sources
@@ -198,6 +202,150 @@ local function studio_hash(inst)
 	return checksum(inst.Source)
 end
 
+-- models (.rbxm / .model.json / .txt) ---------
+
+local function decode(value)
+	local kind = value[1]
+	if kind == "string" or kind == "number" or kind == "boolean" then
+		return value[2]
+	elseif kind == "Vector3" then
+		return Vector3.new(value[2], value[3], value[4])
+	elseif kind == "Vector2" then
+		return Vector2.new(value[2], value[3])
+	elseif kind == "Color3" then
+		return Color3.new(value[2], value[3], value[4])
+	elseif kind == "UDim" then
+		return UDim.new(value[2], value[3])
+	elseif kind == "UDim2" then
+		return UDim2.new(value[2], value[3], value[4], value[5])
+	elseif kind == "CFrame" then
+		return CFrame.new(table.unpack(value, 2, 13))
+	elseif kind == "NumberRange" then
+		return NumberRange.new(value[2], value[3])
+	elseif kind == "Rect" then
+		return Rect.new(value[2], value[3], value[4], value[5])
+	elseif kind == "BrickColor" then
+		return BrickColor.new(value[2])
+	elseif kind == "EnumItem" then
+		return (Enum :: any)[value[2]][value[3]]
+	elseif kind == "NumberSequence" then
+		local points = {}
+		for _, p in value[2] do
+			table.insert(points, NumberSequenceKeypoint.new(p[1], p[2], p[3] or 0))
+		end
+		return NumberSequence.new(points)
+	elseif kind == "ColorSequence" then
+		local points = {}
+		for _, p in value[2] do
+			table.insert(points, ColorSequenceKeypoint.new(p[1], Color3.new(p[2], p[3], p[4])))
+		end
+		return ColorSequence.new(points)
+	elseif kind == "Font" then
+		return Font.new(value[2], Enum.FontWeight[value[3]], Enum.FontStyle[value[4]])
+	end
+	return nil
+end
+
+-- asset fields: new Content properties first, then the older string property (MeshContent -> MeshId)
+local function set_content(inst, name, uri)
+	local ok = pcall(function()
+		inst[name] = Content.fromUri(uri)
+	end)
+	if ok then
+		return
+	end
+	local legacy = name == "MeshContent" and "MeshId" or name:gsub("Content$", "")
+	pcall(function()
+		inst[legacy] = uri
+	end)
+end
+
+local function new_instance(node)
+	if node.class == "MeshPart" then
+		local mesh = node.props.MeshContent or node.props.MeshId
+		local uri = mesh and mesh[2]
+		if uri then
+			local ok, part = pcall(function()
+				return AssetService:CreateMeshPartAsync(Content.fromUri(uri))
+			end)
+			if not ok then
+				ok, part = pcall(function()
+					return InsertService:CreateMeshPartAsync(uri, Enum.CollisionFidelity.Default, Enum.RenderFidelity.Automatic)
+				end)
+			end
+			if ok and part then
+				return part
+			end
+			warn(`[xenon] mesh {uri} could not be loaded, plain MeshPart used`)
+		end
+	end
+	local ok, inst = pcall(Instance.new, node.class)
+	if ok then
+		return inst
+	end
+	warn(`[xenon] cannot create {node.class}, Folder used`)
+	return Instance.new("Folder")
+end
+
+local function build_node(node, by_id, refs)
+	local inst = new_instance(node)
+	inst.Name = node.name
+	by_id[node.id] = inst
+
+	for name, value in node.props do
+		local kind = value[1]
+		if kind == "Ref" then
+			table.insert(refs, { inst = inst, name = name, id = value[2] })
+		elseif kind == "Content" then
+			if name ~= "MeshContent" and name ~= "MeshId" then
+				set_content(inst, name, value[2])
+			end
+		elseif name == "Source" and inst:IsA("LuaSourceContainer") then
+			inst.Source = value[2]
+		else
+			local decoded = decode(value)
+			if decoded ~= nil then
+				pcall(function()
+					inst[name] = decoded
+				end)
+			end
+		end
+	end
+	for key, value in node.attrs or {} do
+		local decoded = decode(value)
+		if decoded ~= nil then
+			pcall(inst.SetAttribute, inst, key, decoded)
+		end
+	end
+	for _, tag in node.tags or {} do
+		CollectionService:AddTag(inst, tag)
+	end
+	for _, child in node.children or {} do
+		build_node(child, by_id, refs).Parent = inst
+	end
+	return inst
+end
+
+-- builds the tree, wires refs (welds, PrimaryPart...), parents it under path's parent
+local function build_model(entry, tree)
+	local by_id, refs = {}, {}
+	local root = build_node(tree, by_id, refs)
+	for _, ref in refs do
+		local target = by_id[ref.id]
+		if target then
+			pcall(function()
+				ref.inst[ref.name] = target
+			end)
+		end
+	end
+	root.Name = entry.path[#entry.path]
+	root:SetAttribute("xenon_hash", entry.hash)
+
+	local parent_path = table.move(entry.path, 1, #entry.path - 1, 1, {})
+	root.Parent = #parent_path == 1 and service(parent_path[1]) or ensure(parent_path, "Folder")
+	return root
+end
+
 -- plan / apply --------------------------
 
 local function describe(plan)
@@ -223,15 +371,22 @@ local function describe(plan)
 	list("update:", plan.update, 15)
 	list("create:", plan.create, 15)
 	list("skipped (studio has a different class):", plan.skip, 10)
+	list("model changed on disk (kept, delete it in studio to re-create):", plan.models_changed or {}, 10)
 	return table.concat(lines, "\n")
 end
 
 local function plan_for(entries, live)
-	local plan = { create = {}, update = {}, conflicts = {}, skip = {} }
+	local plan = { create = {}, update = {}, conflicts = {}, skip = {}, models_changed = {} }
 	for i, entry in entries do
 		local inst = find(entry.path)
 		if not inst then
 			table.insert(plan.create, entry)
+		elseif entry.model then
+			-- models are only created, never replaced: report disk changes to models xenon made
+			local stamp = inst:GetAttribute("xenon_hash")
+			if stamp and stamp ~= entry.hash then
+				table.insert(plan.models_changed, entry.key)
+			end
 		elseif entry.folder then
 			-- container exists, nothing to sync
 		elseif not inst:IsA("LuaSourceContainer") or inst.ClassName ~= entry.class then
@@ -275,6 +430,15 @@ local function apply(plan)
 	local recording = ChangeHistoryService:TryBeginRecording("Xenon sync")
 	local done = 0
 	for _, entry in todo do
+		if entry.model then
+			local tree = sources[entry.key]
+			if type(tree) == "table" then
+				build_model(entry, tree)
+			end
+			done += 1
+			continue
+		end
+
 		local inst = ensure(entry.path, entry.class)
 		if not entry.folder and inst:IsA("LuaSourceContainer") then
 			local source = sources[entry.key]

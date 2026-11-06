@@ -29,6 +29,7 @@ local project -- set by server.start
 local cache = {}
 local current = {} -- key -> entry
 local version = 0
+local session = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) -- new id every server start
 local log = {} -- { version, kind, entry }
 
 
@@ -102,7 +103,7 @@ local function handle(request)
 				scripts += 1
 			end
 		end
-		return json({ name = project.name, placeIds = project.place_ids, version = version, scripts = scripts })
+		return json({ name = project.name, placeIds = project.place_ids, version = version, session = session, scripts = scripts })
 	end
 
 	if path == "/snapshot" then
@@ -117,7 +118,7 @@ local function handle(request)
 			end
 			return a.key < b.key
 		end)
-		return json({ version = version, entries = list })
+		return json({ version = version, session = session, entries = list })
 	end
 
 	if path == "/sources" and request.method == "POST" then
@@ -139,8 +140,9 @@ local function handle(request)
 	if path == "/changes" then
 		local since = tonumber(request.query and request.query.since) or 0
 		local oldest = log[1] and log[1].version or version + 1
-		if since < oldest - 1 and since < version then
-			return json({ version = version, resync = true, changes = {} })
+		-- since > version: the plugin knew a newer server run, this one restarted
+		if since > version or (since < oldest - 1 and since < version) then
+			return json({ version = version, session = session, resync = true, changes = {} })
 		end
 		local changes = {}
 		for _, item in log do
@@ -148,7 +150,7 @@ local function handle(request)
 				table.insert(changes, { version = item.version, kind = item.kind, entry = public(item.entry, item.kind ~= "remove") })
 			end
 		end
-		return json({ version = version, changes = changes })
+		return json({ version = version, session = session, changes = changes })
 	end
 
 	return json({ error = "not found" }, 404)

@@ -73,6 +73,8 @@ Check it works: `xenon version`
 | `KEPT` | a model changed on disk → left alone (delete it in Studio to re-create it) |
 | `SKIPPED` | Studio has something with the same name but a different type → left alone |
 
+- **Click a script** in the list to see its **diff**: red lines = Studio now, green = what disk will put in. Unchanged parts are folded. **Back** returns
+- **● Live** in the header = the server answers. **● Reconnecting…** = it doesn't; Xenon keeps trying and catches up by itself (also after you restart `xenon serve`), no need to Disconnect / Connect
 - **One button** that changes: **Connect** → **Apply** / **Cancel** → **Disconnect**
 
 </td></tr></table>
@@ -156,6 +158,8 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 | You see | Do this |
 | --- | --- |
 | **Server not running** | Run `xenon serve` in your game folder. Check the port in Settings matches |
+| **● Reconnecting…** | The server stopped. Start `xenon serve` again, the plugin reconnects and re-compares on its own |
+| `os error 10048` on serve | Another `xenon serve` (lune) is still running on that port. Close it first |
 | Studio asks to allow `localhost` | Allow it, Xenon talks to the server on your own PC |
 | **Wrong place** | You opened a different place. `placeIds` in `default.project.json` decides |
 | `xenon` is not recognized | Add `tools/xenon/bin` to PATH (see Install), open a new terminal |
@@ -168,7 +172,7 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 ## Development
 
 ```
-xenon test      # mapping + wally tests
+xenon test      # mapping, wally and diff tests
 xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 ```
 
@@ -179,10 +183,11 @@ xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 | `src/mapping.luau` | files → Studio paths (the Rojo rules above) |
 | `src/model.luau` | `.rbxm` / `.model.json` / `.txt` → JSON trees, `.json` / `.toml` → modules |
 | `src/checksum.luau` | same hash on server and plugin |
+| `src/diff.luau` | line diff for the review page (Myers) |
 | `src/server.luau` | watches files, HTTP API on localhost |
 | `src/build.luau` | packs the plugin into `Xenon.rbxm` |
 | `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
-| `tests/` | `mapping_test.luau`, `wally_test.luau` |
+| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau` |
 | `docs/AI.md` | full spec for AI assistants |
 
 Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.

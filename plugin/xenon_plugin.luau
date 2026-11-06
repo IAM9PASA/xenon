@@ -14,6 +14,7 @@ local CollectionService = game:GetService("CollectionService")
 -- MODULES -------------------------
 
 local checksum = require(script.checksum)
+local diff = require(script.diff)
 
 
 -- VARIABLES -------------------------
@@ -50,6 +51,12 @@ local connected = false
 local version = 0
 local known_hash = {} -- key -> hash studio had when xenon last synced it (conflict check)
 local pending = nil -- plan waiting for Apply
+local session = nil -- id of the server run we synced with. changes when `xenon serve` restarts
+local server_ok = true -- false while the server does not answer
+local loop_id = 0 -- bumps on connect / disconnect so an old poll loop stops
+local diff_token = nil -- newest diff request, older answers are dropped
+
+local DIFF_MAX_ROWS = 600
 
 local toolbar = plugin:CreateToolbar("Xenon")
 local toggle_button = toolbar:CreateButton("Xenon", "Sync files from disk (never deletes)", "")
@@ -142,7 +149,17 @@ make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12
 local header = make("Frame", { Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1 }, root)
 local status_dot = make("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.fromOffset(10, 10), BackgroundColor3 = COLOR.grey, BorderSizePixel = 0 }, header)
 corner(status_dot, 5)
-local header_title = text({ Position = UDim2.fromOffset(18, 0), Size = UDim2.new(1, -110, 1, 0), Font = Enum.Font.BuilderSansBold, TextSize = 15, Text = "Xenon" }, header)
+local header_title = text({ Position = UDim2.fromOffset(18, 0), Size = UDim2.new(1, -210, 1, 0), Font = Enum.Font.BuilderSansBold, TextSize = 15, Text = "Xenon", TextTruncate = Enum.TextTruncate.AtEnd }, header)
+-- connection check: green "Live" while the server answers, red "Reconnecting" while it does not
+local live_label = text({
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -92, 0, 0),
+	Size = UDim2.new(0, 104, 1, 0),
+	Font = Enum.Font.BuilderSansBold,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	Text = "",
+}, header)
 local settings_button = make("TextButton", {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.fromScale(1, 0),
@@ -217,6 +234,24 @@ local settings_page = make("ScrollingFrame", {
 }, root)
 make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, settings_page)
 
+-- diff page: one script, studio (red) -> disk (green)
+local diff_page = make("Frame", { Position = UDim2.fromOffset(0, 36), Size = UDim2.new(1, 0, 1, -36), BackgroundTransparency = 1, Visible = false }, root)
+local diff_title = text({ Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.BuilderSansBold, TextSize = 15, Text = "", TextTruncate = Enum.TextTruncate.AtEnd }, diff_page)
+local diff_sub = text({ Position = UDim2.fromOffset(0, 21), Size = UDim2.new(1, 0, 0, 18), TextSize = 13, TextColor3 = COLOR.dim, Text = "" }, diff_page)
+local diff_list = make("ScrollingFrame", {
+	Position = UDim2.fromOffset(0, 46),
+	Size = UDim2.new(1, 0, 1, -46),
+	BackgroundColor3 = COLOR.card,
+	BorderSizePixel = 0,
+	AutomaticCanvasSize = Enum.AutomaticSize.XY,
+	CanvasSize = UDim2.new(),
+	ScrollBarThickness = 6,
+	ScrollBarImageColor3 = COLOR.line,
+}, diff_page)
+corner(diff_list)
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, diff_list)
+make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingRight = UDim.new(0, 8) }, diff_list)
+
 -- status ---------------------------------
 
 local function set_status(state: string, title: string, sentence: string)
@@ -225,6 +260,26 @@ local function set_status(state: string, title: string, sentence: string)
 	header_title.Text = connected and `Xenon  ·  localhost:{settings.port}` or "Xenon"
 	summary.Text = title
 	hint.Text = sentence
+end
+
+local function set_live(state: string)
+	if state == "live" then
+		live_label.Text = "● Live"
+		live_label.TextColor3 = COLOR.green
+	elseif state == "lost" then
+		live_label.Text = "● Reconnecting…"
+		live_label.TextColor3 = COLOR.red
+	else
+		live_label.Text = ""
+	end
+end
+
+-- pages: "main", "settings", "diff"
+local function show_page(name: string)
+	main_page.Visible = name == "main"
+	settings_page.Visible = name == "settings"
+	diff_page.Visible = name == "diff"
+	settings_button.Text = name == "main" and "Settings" or "Back"
 end
 
 local function short_path(key: string): string
@@ -243,11 +298,37 @@ local function clear_list()
 	end
 end
 
-local function add_row(tag: string, color: Color3, key: string, order: number)
-	local row = make("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, LayoutOrder = order }, list)
-	text({ Size = UDim2.fromOffset(64, 20), Font = Enum.Font.BuilderSansBold, TextSize = 12, TextColor3 = color, Text = tag }, row)
-	local label = text({ Position = UDim2.fromOffset(66, 0), Size = UDim2.new(1, -66, 1, 0), TextSize = 13, Text = short_path(key), TextTruncate = Enum.TextTruncate.AtEnd, TextWrapped = false }, row)
+local open_diff -- defined below, needs the server + studio helpers
+
+-- entry given (a script) -> the row is clickable and opens its diff
+local function add_row(tag: string, color: Color3, key: string, order: number, entry)
+	local clickable = entry ~= nil and not entry.folder and not entry.model
+	local row = make(clickable and "TextButton" or "Frame", {
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundColor3 = COLOR.line,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+	}, list)
+	text({ Position = UDim2.fromOffset(4, 0), Size = UDim2.fromOffset(62, 20), Font = Enum.Font.BuilderSansBold, TextSize = 12, TextColor3 = color, Text = tag }, row)
+	local label = text({ Position = UDim2.fromOffset(68, 0), Size = UDim2.new(1, clickable and -88 or -68, 1, 0), TextSize = 13, Text = short_path(key), TextTruncate = Enum.TextTruncate.AtEnd }, row)
 	label.TextWrapped = false
+	if not clickable then
+		return
+	end
+	corner(row, 4)
+	row.Text = ""
+	row.AutoButtonColor = false
+	text({ AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.fromOffset(18, 20), TextSize = 16, TextColor3 = COLOR.dim, TextXAlignment = Enum.TextXAlignment.Center, Text = "›" }, row)
+	row.MouseEnter:Connect(function()
+		row.BackgroundTransparency = 0.4
+	end)
+	row.MouseLeave:Connect(function()
+		row.BackgroundTransparency = 1
+	end)
+	row.MouseButton1Click:Connect(function()
+		open_diff(entry, tag, color)
+	end)
 end
 
 local function set_chip(c, count, word)
@@ -271,7 +352,8 @@ local function show_plan(plan)
 			end
 			order += 1
 			shown += 1
-			add_row(tag, color, type(item) == "table" and item.key or item, order)
+			local entry = type(item) == "table" and item or nil
+			add_row(tag, color, entry and entry.key or item, order, entry)
 		end
 	end
 	rows(plan.conflicts, "CONFLICT", COLOR.red)
@@ -381,6 +463,96 @@ local function ensure(path, class)
 		node = child
 	end
 	return node
+end
+
+-- diff review -------------------------------
+
+local DIFF_STYLE = {
+	add = { sign = "+", color = COLOR.green },
+	del = { sign = "-", color = COLOR.red },
+	same = { sign = " " },
+}
+
+local function diff_row(order: number, number_text: string, code: string, style)
+	local row = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 17),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = style.color or COLOR.card,
+		BackgroundTransparency = style.color and 0.82 or 1,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+	}, diff_list)
+	text({ Size = UDim2.new(0, 40, 1, 0), Font = Enum.Font.Code, TextSize = 12, TextColor3 = COLOR.dim, TextXAlignment = Enum.TextXAlignment.Right, Text = number_text }, row)
+	local label = text({
+		Position = UDim2.fromOffset(48, 0),
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Font = Enum.Font.Code,
+		TextSize = 13,
+		TextColor3 = style.color or COLOR.text,
+		Text = code,
+	}, row)
+	label.TextWrapped = false
+end
+
+function open_diff(entry, tag: string, color: Color3)
+	for _, child in diff_list:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+	diff_title.Text = entry.key
+	diff_title.TextColor3 = color
+	diff_sub.Text = "Loading the file from disk…"
+	diff_list.CanvasPosition = Vector2.zero
+	show_page("diff")
+
+	local token = {}
+	diff_token = token
+	local result, err = request("POST", "/sources", { keys = { entry.key } })
+	if diff_token ~= token then
+		return -- another diff was opened meanwhile
+	end
+	local disk = result and result[entry.key]
+	if type(disk) ~= "string" then
+		diff_sub.Text = `Could not load it from the server. {err or "file is gone"}`
+		return
+	end
+
+	local inst = find(entry.path)
+	local studio = inst and inst:IsA("LuaSourceContainer") and inst.Source or ""
+	local edits = diff.lines(studio, disk)
+	local added, removed = diff.count(edits)
+
+	if added + removed == 0 then
+		diff_sub.Text = `{tag}  ·  same code, only Enabled changes (disabled on disk: {entry.disabled})`
+	elseif inst then
+		diff_sub.Text = `{tag}  ·  +{added}  -{removed}  ·  red = Studio now, green = disk`
+	else
+		diff_sub.Text = `{tag}  ·  new script, {added} lines`
+	end
+
+	local order = 0
+	for _, edit in diff.fold(edits, 3) do
+		order += 1
+		if order > DIFF_MAX_ROWS then
+			diff_row(order, "", `… {DIFF_MAX_ROWS}+ rows, open the file in your editor for the rest`, { color = nil })
+			break
+		end
+		if edit.kind == "fold" then
+			diff_row(order, "", `⋯  {edit.count} unchanged line{edit.count == 1 and "" or "s"}`, { color = nil })
+		else
+			local style = DIFF_STYLE[edit.kind]
+			local code = edit.text:gsub("\t", "    ")
+			diff_row(order, tostring(edit.new or edit.old), `{style.sign} {code}`, style)
+		end
+		if order % 100 == 0 then
+			task.wait()
+			if diff_token ~= token then
+				return
+			end
+		end
+	end
 end
 
 -- models (.rbxm / .model.json / .txt) ------
@@ -628,7 +800,7 @@ local function show_review(plan)
 		"review",
 		count == 1 and "1 change ready" or `{count} changes ready`,
 		#plan.conflicts > 0 and "Some scripts were edited in Studio and on disk. Those (red) are left alone. Apply brings in the rest. Nothing is deleted."
-			or "Press Apply to bring these into Studio. Nothing is deleted. Ctrl+Z undoes it."
+			or "Click a script to see what changes. Apply brings them into Studio. Nothing is deleted, Ctrl+Z undoes it."
 	)
 	show_plan(plan)
 	refresh_buttons()
@@ -642,10 +814,15 @@ local poll_loop
 local function full_sync()
 	local snapshot, err = request("GET", "/snapshot")
 	if not snapshot then
-		set_status("error", "Lost the server", `Is \`xenon serve\` still running?\n{err}`)
+		server_ok = false
+		set_live("lost")
+		set_status("error", "Lost the server", `Retrying… is \`xenon serve\` still running?\n{err}`)
 		return false
 	end
 	version = snapshot.version
+	session = snapshot.session
+	server_ok = true
+	set_live("live")
 	set_status("busy", "Comparing…", `Checking {#snapshot.entries} files against Studio.`)
 	local plan = plan_for(snapshot.entries, false)
 	if #plan.create + #plan.update == 0 then
@@ -671,15 +848,21 @@ local function connect()
 	end
 
 	connected = true
+	server_ok = true
+	session = info.session
+	loop_id += 1
 	refresh_buttons()
-	if full_sync() then
-		task.spawn(poll_loop)
-	end
+	full_sync()
+	task.spawn(poll_loop, loop_id) -- runs even if the first sync failed: it reconnects by itself
 end
 
 local function disconnect()
 	connected = false
 	pending = nil
+	session = nil
+	loop_id += 1
+	set_live("off")
+	show_page("main")
 	clear_list()
 	for _, c in { chip_update, chip_new, chip_conflict, chip_kept } do
 		c.Visible = false
@@ -688,20 +871,38 @@ local function disconnect()
 	refresh_buttons()
 end
 
-function poll_loop()
-	while connected do
+-- one request per tick. while a review waits it only pings /info, so the connection check
+-- and server-restart detection never pause
+function poll_loop(my_id: number)
+	while connected and loop_id == my_id do
 		task.wait(settings.poll_seconds)
-		if not connected or pending then
+		if not connected or loop_id ~= my_id then
+			break
+		end
+
+		local result, err = request("GET", pending and "/info" or `/changes?since={version}`)
+		if not connected or loop_id ~= my_id then
+			break
+		end
+		if not result then
+			if server_ok then
+				server_ok = false
+				set_live("lost")
+				set_status("error", "Lost the server", `Retrying… is \`xenon serve\` still running?\n{err}`)
+			end
 			continue
 		end
 
-		local result, err = request("GET", `/changes?since={version}`)
-		if not result then
-			set_status("error", "Lost the server", `Retrying… is \`xenon serve\` still running?\n{err}`)
+		-- back after a drop, a new `xenon serve` run, or too far behind: compare everything again
+		local restarted = result.session ~= nil and result.session ~= session
+		if not server_ok or restarted or result.resync then
+			if restarted then
+				log("server restarted, comparing everything again")
+			end
+			full_sync()
 			continue
 		end
-		if result.resync then
-			full_sync()
+		if pending then
 			continue
 		end
 
@@ -803,9 +1004,7 @@ local function build_settings_page()
 end
 
 local function show_settings(open: boolean)
-	settings_page.Visible = open
-	main_page.Visible = not open
-	settings_button.Text = open and "Back" or "Settings"
+	show_page(open and "settings" or "main")
 	if open then
 		build_settings_page()
 	end
@@ -838,7 +1037,8 @@ toggle_button.Click:Connect(function()
 end)
 
 settings_button.MouseButton1Click:Connect(function()
-	show_settings(not settings_page.Visible)
+	diff_token = nil -- stops a diff that is still drawing
+	show_settings(main_page.Visible)
 end)
 
 primary_button.MouseButton1Click:Connect(function()

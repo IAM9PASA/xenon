@@ -1,4 +1,4 @@
--- packs plugin/xenon_plugin.luau + src/checksum.luau into Xenon.rbxm and installs it into studio's Plugins folder.
+-- packs plugin/xenon_plugin.luau + src/checksum.luau + src/diff.luau into Xenon.rbxm and installs it into studio's Plugins folder.
 -- called by the cli:  xenon build   (paths are relative to the xenon folder, the cli runs from there)
 
 local fs = require("@lune/fs")
@@ -14,6 +14,11 @@ return function()
 	checksum.Name = "checksum"
 	checksum.Source = fs.readFile("src/checksum.luau")
 	checksum.Parent = plugin_script
+
+	local diff = roblox.Instance.new("ModuleScript")
+	diff.Name = "diff"
+	diff.Source = fs.readFile("src/diff.luau")
+	diff.Parent = plugin_script
 
 	local plugins_dir = process.env.LOCALAPPDATA .. "/Roblox/Plugins"
 	if not fs.isDir(plugins_dir) then

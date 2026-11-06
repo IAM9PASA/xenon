@@ -45,8 +45,9 @@ Studio plugin ── polls /changes every poll_seconds ──► plan (create/up
 | `src/mapping.luau` | `load_project(file)`, `snapshot(project, cache)`. Turns files into entries (section 5). |
 | `src/model.luau` | `from_rbxm`, `from_model_json`, `from_text`, `from_instances` → instance trees (section 6); `data_module(contents, "json"|"toml")` → Luau source. |
 | `src/checksum.luau` | `checksum(source) -> "<length> <hash>"`. CRLF → LF first. Rolling hash `h = (h*31 + byte) % 1000000007`. Same code runs in the plugin. |
-| `src/build.luau` | Packs `plugin/xenon_plugin.luau` (Script "Xenon") + `src/checksum.luau` (child ModuleScript "checksum") into `Xenon.rbxm`, copies it to `%LOCALAPPDATA%/Roblox/Plugins/`. |
-| `plugin/xenon_plugin.luau` | Studio side: UI (main + settings page), HTTP client, plan, apply, model builder, live poll. |
+| `src/diff.luau` | `diff.lines(old, new)` Myers line diff (common prefix/suffix trimmed, > 1000 edits → shown as full replace), `diff.fold(edits, context)`, `diff.count(edits)`. Pure Luau, used by the plugin's diff page, tested in `tests/diff_test.luau`. |
+| `src/build.luau` | Packs `plugin/xenon_plugin.luau` (Script "Xenon") + `src/checksum.luau` and `src/diff.luau` (child ModuleScripts "checksum", "diff") into `Xenon.rbxm`, copies it to `%LOCALAPPDATA%/Roblox/Plugins/`. |
+| `plugin/xenon_plugin.luau` | Studio side: UI (main, settings and diff pages, Live indicator), HTTP client, plan, apply, model builder, live poll. |
 | `tests/mapping_test.luau`, `tests/wally_test.luau` | Plain Lune scripts; print `all ... tests passed` or error. Run via `xenon test`. |
 | `assets/` | Original logo (SVG + PNG), `render_logo.js`. `asphalt.toml` uploads the PNGs as user 1316704411. |
 
@@ -151,10 +152,10 @@ All responses are JSON. Errors: `{ "error": "..." }` with 400 / 404 / 500.
 
 | Method + path | Request | Response |
 | --- | --- | --- |
-| `GET /info` | — | `{ name, placeIds: number[], version: number, scripts: number }` |
-| `GET /snapshot` | — | `{ version, entries: PublicEntry[] }` (no sources/trees) |
+| `GET /info` | — | `{ name, placeIds: number[], version: number, session: string, scripts: number }` |
+| `GET /snapshot` | — | `{ version, session, entries: PublicEntry[] }` (no sources/trees) |
 | `POST /sources` | `{ keys: string[] }` | `{ [key]: string (script source) or table (model tree) }` |
-| `GET /changes?since=N` | — | `{ version, changes: Change[] }` or `{ version, resync: true, changes: [] }` when N is older than the log |
+| `GET /changes?since=N` | — | `{ version, session, changes: Change[] }` or `{ version, session, resync: true, changes: [] }` when N is older than the log **or newer than `version`** (server restarted) |
 
 ```lua
 PublicEntry = { key, path, class, hash?, disabled?, folder?, model? (true), source? , tree? }
@@ -162,11 +163,11 @@ PublicEntry = { key, path, class, hash?, disabled?, folder?, model? (true), sour
 Change = { version: number, kind: "create" | "update" | "remove", entry: PublicEntry }
 ```
 
-`version` increases by 1 per change. The plugin stores the last seen version and asks `/changes?since=version`.
+`version` increases by 1 per change and restarts at 0 with every `xenon serve` run. `session` is a new random id per run (`<os.time>-<random>`). The plugin stores the last seen version + session and asks `/changes?since=version`; a different session means "server restarted" → full resync.
 
 ## 8. Plugin algorithms (`plugin/xenon_plugin.luau`)
 
-**connect():** `GET /info` → place check (I6) → `full_sync()` → start `poll_loop`.
+**connect():** `GET /info` → place check (I6) → `full_sync()` → start `poll_loop(loop_id)` (always, even if the first sync failed). `loop_id` bumps on connect/disconnect so an old loop exits.
 
 **full_sync():** `GET /snapshot` → `plan_for(entries, live = false)` → nothing to do: "In sync"; else `show_review` (waits for Apply, I3).
 
@@ -180,9 +181,11 @@ Change = { version: number, kind: "create" | "update" | "remove", entry: PublicE
 
 **apply(plan):** fetch sources/trees for create+update in batches of 80 → one ChangeHistory recording (I7) → models: `build_model`; scripts: `ensure(path, class)` (creates missing ancestors as Folder, never removes), `ScriptEditorService:UpdateSourceAsync`, set `Enabled`.
 
-**poll_loop():** every `poll_seconds`, skipped while a plan waits for Apply. `resync` → `full_sync`. `remove` changes → `warn` only (I8). Others → `plan_for(live = true)` → review if conflicts / auto_apply off / count > auto_apply_limit, else apply directly.
+**poll_loop():** every `poll_seconds` one request: `/info` while a plan waits for Apply (heartbeat only), else `/changes`. Request fails → Live indicator "Reconnecting…" (once). Server back after a drop, `session` changed, or `resync` → `full_sync` (replaces a pending plan). While pending nothing else happens. `remove` changes → `warn` only (I8). Others → `plan_for(live = true)` → review if conflicts / auto_apply off / count > auto_apply_limit, else apply directly.
 
 **UI states** (dot color / big line): off grey "Not connected"; busy blue "Connecting…" "Comparing…" "Applying…"; ok green "In sync" / "Skipped"; review yellow "N changes ready"; error red "Server not running" / "Lost the server" / "Wrong place" / "Apply failed". Primary button: Connect → Apply (with Cancel) → Disconnect.
+
+**open_diff(entry):** list rows for create/update/conflict scripts are buttons. Click → `POST /sources {keys=[key]}` → `diff.lines(studio Source or "", disk source)` → `diff.fold(…, 3)` → rows (red `-` = Studio now, green `+` = disk), max 600 rows, yields every 100. A newer click or Back cancels drawing (`diff_token`). Read-only: never changes Studio.
 
 ## 9. Settings (plugin)
 

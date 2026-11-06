@@ -1,5 +1,5 @@
--- xenon server: watches the project's scripts and serves them to the studio plugin.
--- run from the game folder:  lune run <xenon>/src/server.luau [default.project.json] [port]
+-- xenon server: watches the project's files and serves them to the studio plugin.
+-- started by the cli:  xenon serve [project.json] [--port N]   (see xenon.luau)
 -- api (json, localhost only):
 --   GET  /info              { name, placeIds, version, scripts }
 --   GET  /snapshot          { version, entries = [{ key, path, class, hash, disabled, folder }] }   no sources
@@ -12,7 +12,6 @@
 
 local net = require("@lune/net")
 local serde = require("@lune/serde")
-local process = require("@lune/process")
 local task = require("@lune/task")
 
 
@@ -23,12 +22,10 @@ local mapping = require("./mapping")
 
 -- VARIABLES -------------------------
 
-local PROJECT_FILE = process.args[1] or "default.project.json"
-local PORT = tonumber(process.args[2]) or 34872
 local POLL_SECONDS = 1
 local MAX_LOG = 2000
 
-local project = mapping.load_project(PROJECT_FILE)
+local project -- set by server.start
 local cache = {}
 local current = {} -- key -> entry
 local version = 0
@@ -160,29 +157,39 @@ end
 
 -- MAIN -------------------------
 
-current = index(mapping.snapshot(project, cache))
-local count = 0
-for _, entry in current do
-	if not entry.folder then
-		count += 1
+local server = {}
+
+-- blocks forever: initial scan, http server, rescan loop
+function server.start(project_file: string, port: number)
+	project = mapping.load_project(project_file)
+	current = index(mapping.snapshot(project, cache))
+
+	local count = 0
+	for _, entry in current do
+		if not entry.folder then
+			count += 1
+		end
+	end
+
+	net.serve(port, function(request)
+		local ok, response = pcall(handle, request)
+		if ok then
+			return response
+		end
+		warn("[xenon] request failed: " .. tostring(response))
+		return json({ error = tostring(response) }, 500)
+	end)
+
+	print(`[xenon] serving "{project.name}" on http://localhost:{port}  ({count} scripts, never deletes)`)
+	print("[xenon] studio: Plugins tab -> Xenon -> Connect.  stop: Ctrl+C")
+
+	while true do
+		task.wait(POLL_SECONDS)
+		local ok, err = pcall(rescan)
+		if not ok then
+			warn("[xenon] rescan failed: " .. tostring(err))
+		end
 	end
 end
 
-net.serve(PORT, function(request)
-	local ok, response = pcall(handle, request)
-	if ok then
-		return response
-	end
-	warn("[xenon] request failed: " .. tostring(response))
-	return json({ error = tostring(response) }, 500)
-end)
-
-print(`[xenon] serving "{project.name}" on http://localhost:{PORT}  ({count} scripts, never deletes)`)
-
-while true do
-	task.wait(POLL_SECONDS)
-	local ok, err = pcall(rescan)
-	if not ok then
-		warn("[xenon] rescan failed: " .. tostring(err))
-	end
-end
+return server

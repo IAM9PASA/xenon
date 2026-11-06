@@ -1,57 +1,192 @@
+<p align="center"><img src="assets/xenon_logo_256.png" width="128" alt="Xenon logo"></p>
+
 # Xenon
 
-Safe script sync for Roblox: disk -> Studio. Built because Argon deletes Studio-only content.
+**Safe file sync for Roblox: disk → Studio. It never deletes anything.**
 
-File types (same rules as Rojo / Argon, so Wally packages work):
+You write code in your editor, Xenon puts it into Roblox Studio within about a second.
+Built because Argon wanted to delete 1,386 Studio-only things (UI, models) from our game.
 
-| File | Becomes |
+- Scripts, models and data files from disk show up in Studio
+- **Nothing in Studio is ever deleted.** Files removed on disk are only reported
+- You see the changes first and press **Apply**. Ctrl+Z undoes it
+- If you edited a script in Studio *and* on disk, Xenon leaves it alone and tells you
+- Works with **Wally** packages, `.rbxm` models, `.json` / `.toml` data, `.txt`
+- Locked to your place, so it can't sync into the wrong game
+
+---
+
+## Quick start
+
+1. **Start the server** in your game folder (where `default.project.json` is):
+   ```
+   xenon serve
+   ```
+2. **In Studio:** Plugins tab → **Xenon** → **Connect**.
+3. Look at the list, press **Apply**. Done. From now on, every file you save shows up in Studio.
+
+Stop the server with **Ctrl+C**.
+
+---
+
+## Install
+
+You need [rokit](https://github.com/rojo-rbx/rokit) (installs Lune for you).
+
+1. Get the code:
+   ```
+   git clone https://github.com/IAM9PASA/xenon "D:/coding/roblox work/tools/xenon"
+   ```
+2. Install Lune (inside the xenon folder):
+   ```
+   cd "D:/coding/roblox work/tools/xenon"
+   rokit install
+   ```
+3. **Add the `bin` folder to your PATH** so `xenon` works everywhere:
+   `D:\coding\roblox work\tools\xenon\bin`
+   (Windows: Start → "Edit the system environment variables" → Environment Variables → Path → New)
+4. Install the Studio plugin:
+   ```
+   xenon build
+   ```
+   then restart Studio.
+
+Check it works: `xenon version`
+
+---
+
+## The plugin
+
+<table><tr><td>
+
+- **Dot + big line** tell you what's going on:
+  - grey **Not connected**, green **In sync**, yellow **N changes ready**, red **something's wrong**
+- **One sentence** tells you what to do next
+- **Chips** count the changes: `update`, `new`, `conflict`, `kept as is`
+- **The list** shows each change with a tag:
+
+| Tag | Meaning |
 | --- | --- |
-| `.server.luau` / `.client.luau` / `.luau` (or `.lua`) | Script / LocalScript / ModuleScript |
-| `Folder/init.*.luau`, `init.meta.json`, `Name.meta.json` | folder is the script / className / Disabled |
-| `Folder/default.project.json` | nested project (every Wally package in `_Index`) |
-| `.rbxm` / `.rbxmx` / `.model.json` | model, built by the plugin (meshes via AssetService, refs rewired) |
-| `.json` / `.toml` | ModuleScript returning the data |
-| `.txt` | StringValue |
+| `UPDATE` | script exists in Studio, code on disk is different → will be replaced with the disk version |
+| `NEW` | not in Studio yet → will be created |
+| `CONFLICT` | edited in Studio **and** on disk since the last sync → **left alone** |
+| `KEPT` | a model changed on disk → left alone (delete it in Studio to re-create it) |
+| `SKIPPED` | Studio has something with the same name but a different type → left alone |
 
-Wally: map `Packages` / `ServerPackages` in `default.project.json`, run `wally install`, Xenon picks them up.
+- **One button** that changes: **Connect** → **Apply** / **Cancel** → **Disconnect**
 
-Rules:
-- scripts are created and updated; models are only created when missing (tagged `xenon_hash`, disk changes reported)
-- never deletes anything in Studio. Files removed on disk are only reported
-- checksum on both sides: only scripts whose code really differs are sent
-- shows the plan first (create / update / conflicts / delete 0), applies on Apply
-- live: edits reach Studio within ~1s. Batches over 20, or any conflict, wait for Apply
-- conflict = script edited in Studio AND on disk since the last sync -> left untouched
-- locked to `placeIds` from the project file
+</td></tr></table>
 
-## Use
+### Settings
+
+Click **Settings** in the plugin. Saved per user, take effect right away.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Server port | `34872` | Must match `xenon serve --port` |
+| Apply small changes automatically | On | Off = every change waits for Apply |
+| Ask first above this many changes | `20` | Bigger batches always wait for Apply |
+| Check for changes every (seconds) | `0.5` | Lower = faster updates |
+| Sync models | On | `.rbxm`, `.model.json`, `.txt` (created only, never replaced) |
+| Print changes in Output | On | One line per applied batch |
+| Toolbar icon (decal id) | `57445653` | Any decal id, after a Studio restart |
+
+---
+
+## Commands
 
 ```
-# 1. in the game folder (needs lune in rokit.toml)
-lune run "D:/coding/roblox work/tools/xenon/src/server.luau" default.project.json 34872
-
-# 2. Studio: Plugins tab -> Xenon -> Connect -> review -> Apply
+xenon serve [project.json] [--port N]   start syncing (default ./default.project.json, port 34872)
+xenon build                             build + install the Studio plugin
+xenon test                              run the tests
+xenon version                           print the version
+xenon help                              show this list
 ```
 
-Build / reinstall the plugin after editing `plugin/xenon_plugin.luau`:
+---
 
-```
-cd "D:/coding/roblox work/tools/xenon"
-lune run build_plugin.luau
-```
+## What becomes what
 
-Tests: `lune run tests/mapping_test.luau`
+Same rules as Rojo and Argon, so existing projects just work.
 
-## Files
-
-| File | Job |
+| On disk | In Studio |
 | --- | --- |
-| `src/mapping.luau` | project.json + files -> instance paths (argon / rojo naming rules) |
-| `src/checksum.luau` | same hash on server and plugin (crlf normalized) |
-| `src/server.luau` | watches files, HTTP api on localhost (`/info`, `/snapshot`, `/sources`, `/changes`) |
-| `plugin/xenon_plugin.luau` | Studio side: connect, diff, review, apply, live poll |
-| `build_plugin.luau` | packs the plugin into `%LOCALAPPDATA%/Roblox/Plugins/Xenon.rbxm` |
+| `Name.server.luau` | Script |
+| `Name.client.luau` | LocalScript |
+| `Name.luau` (or `.lua`) | ModuleScript |
+| `Folder/init.server.luau` (or `.client` / plain) | the folder itself becomes that script, other files become its children |
+| `Folder/init.meta.json` `{"className": "ScreenGui"}` | the folder becomes that class |
+| `Name.meta.json` `{"properties": {"Disabled": true}}` | the script starts disabled |
+| first line `--disable` | the script starts disabled |
+| `Folder/default.project.json` | nested project (every Wally package) |
+| `Name.rbxm` / `Name.rbxmx` | the model inside (one root → renamed to `Name`) |
+| `Name.model.json` | instances described in JSON |
+| `Name.json` / `Name.toml` | ModuleScript that returns the data |
+| `Name.txt` | StringValue |
 
-## Not in v1
+Where things go is decided by `default.project.json` (`$path` per service), like Rojo.
 
-Studio -> disk (pull), syncing UI / models / non-script files, deletes.
+### Wally
+
+Map Wally's folders in `default.project.json`, then run `wally install`:
+
+```json
+"ReplicatedStorage": { "Packages": { "$path": "Packages" } },
+"ServerScriptService": { "ServerPackages": { "$path": "ServerPackages" } }
+```
+
+Xenon follows each package's own `default.project.json`, so `require(ReplicatedStorage.Packages.vide)` just works.
+
+---
+
+## Safety rules
+
+1. **Never deletes.** There is no delete code, in the plugin or the server.
+2. **Only sends real changes.** Both sides compare a checksum of the code.
+3. **Shows first.** First connect and big batches wait for Apply.
+4. **Protects Studio edits.** Edited in both places → conflict, untouched.
+5. **Models are create-only.** Changed models are reported, not replaced.
+6. **Place lock.** `placeIds` in `default.project.json` → only that place.
+7. **Undo.** Every apply is one Ctrl+Z step.
+
+---
+
+## Troubleshooting
+
+| You see | Do this |
+| --- | --- |
+| **Server not running** | Run `xenon serve` in your game folder. Check the port in Settings matches |
+| Studio asks to allow `localhost` | Allow it, Xenon talks to the server on your own PC |
+| **Wrong place** | You opened a different place. `placeIds` in `default.project.json` decides |
+| `xenon` is not recognized | Add `tools/xenon/bin` to PATH (see Install), open a new terminal |
+| `Failed to find tool 'lune'` | Run `rokit install` inside the xenon folder |
+| Lots of `SKIPPED` | Studio has a different type with that name (e.g. a Folder where disk has a script). Fix one side |
+| A model shows `KEPT` | Xenon never replaces models. Delete it in Studio, Xenon re-creates it |
+
+---
+
+## Development
+
+```
+xenon test      # mapping + wally tests
+xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
+```
+
+| Path | Job |
+| --- | --- |
+| `xenon.luau` | the CLI (`serve`, `build`, `test`) |
+| `bin/xenon`, `bin/xenon.cmd` | launchers you put on PATH |
+| `src/mapping.luau` | files → Studio paths (the Rojo rules above) |
+| `src/model.luau` | `.rbxm` / `.model.json` / `.txt` → JSON trees, `.json` / `.toml` → modules |
+| `src/checksum.luau` | same hash on server and plugin |
+| `src/server.luau` | watches files, HTTP API on localhost |
+| `src/build.luau` | packs the plugin into `Xenon.rbxm` |
+| `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
+| `tests/` | `mapping_test.luau`, `wally_test.luau` |
+| `docs/AI.md` | full spec for AI assistants |
+
+Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.
+
+## Not yet
+
+Studio → disk (pull), live long-polling, and deletes (on purpose).

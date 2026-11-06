@@ -1,0 +1,17 @@
+# Xenon
+
+> Safe one-way file sync for Roblox: disk -> Roblox Studio. Never deletes anything in Studio. Luau CLI/server on Lune + a Luau Studio plugin. Rojo / Argon compatible project layout, full Wally support.
+
+## Docs
+
+- [Spec for AI assistants](docs/AI.md): invariants, architecture, mapping rules, model tree format, HTTP API, plugin algorithms, settings, how to extend
+- [README](README.md): install, quick start, plugin UI, settings, commands, troubleshooting
+
+## Code
+
+- [CLI](xenon.luau): xenon serve / build / test / version
+- [Server](src/server.luau): HTTP API on localhost
+- [Mapping](src/mapping.luau): files -> Studio instance paths
+- [Models](src/model.luau): .rbxm / .model.json / .txt -> JSON trees, .json / .toml -> modules
+- [Plugin](plugin/xenon_plugin.luau): Studio UI, settings, diff, apply
+- [Tests](tests/): mapping_test.luau, wally_test.luau

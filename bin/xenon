@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# xenon launcher (git bash / sh). add this bin folder to PATH, then: xenon help
+XENON_CWD="$(pwd)"
+export XENON_CWD
+cd "$(dirname "$0")/.." || exit 1
+exec lune run xenon.luau "$@"

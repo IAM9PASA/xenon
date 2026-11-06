@@ -2,13 +2,13 @@
 
 # Xenon
 
-**Safe file sync for Roblox: disk → Studio. It never deletes anything.**
+**Safe file sync for Roblox: disk → Studio. It only deletes scripts you delete on disk, nothing else.**
 
 You write code in your editor, Xenon puts it into Roblox Studio within about a second.
 Built because Argon wanted to delete 1,386 Studio-only things (UI, models) from our game.
 
 - Scripts, models and data files from disk show up in Studio
-- **Nothing in Studio is ever deleted.** Files removed on disk are only reported
+- **Delete a script file → it's removed in Studio** (only while connected, only if you didn't edit it in Studio). Studio-only things are never touched
 - You see the changes first and press **Apply**. Ctrl+Z undoes it
 - If you edited a script in Studio *and* on disk, Xenon leaves it alone and tells you
 - Works with **Wally** packages, `.rbxm` models, `.json` / `.toml` data, `.txt`
@@ -71,6 +71,7 @@ Check it works: `xenon version`
 | `NEW` | not in Studio yet → will be created |
 | `CONFLICT` | edited in Studio **and** on disk since the last sync → **left alone** |
 | `KEPT` | a model changed on disk → left alone (delete it in Studio to re-create it) |
+| `DELETE` | script file was deleted on disk → will be removed from Studio (Ctrl+Z brings it back) |
 | `SKIPPED` | Studio has something with the same name but a different type → left alone |
 
 - **Click a script** in the list to see its **diff**: red lines = Studio now, green = what disk will put in. Unchanged parts are folded. **Back** returns
@@ -89,6 +90,7 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 | Apply small changes automatically | On | Off = every change waits for Apply |
 | Ask first above this many changes | `20` | Bigger batches always wait for Apply |
 | Check for changes every (seconds) | `0.5` | Lower = faster updates |
+| Remove scripts deleted on disk | On | Off = deleted files are only reported |
 | Sync models | On | `.rbxm`, `.model.json`, `.txt` (created only, never replaced) |
 | Print changes in Output | On | One line per applied batch |
 | Toolbar icon (decal id) | `57445653` | Any decal id, after a Studio restart |
@@ -143,7 +145,7 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 
 ## Safety rules
 
-1. **Never deletes.** There is no delete code, in the plugin or the server.
+1. **Deletes only what you deleted.** A script is removed only when its file is deleted while connected, Studio still has exactly the disk version, and it has no children. Connect / full sync never deletes, folders and models are never deleted
 2. **Only sends real changes.** Both sides compare a checksum of the code.
 3. **Shows first.** First connect and big batches wait for Apply.
 4. **Protects Studio edits.** Edited in both places → conflict, untouched.
@@ -194,4 +196,4 @@ Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-
 
 ## Not yet
 
-Studio → disk (pull), live long-polling, and deletes (on purpose).
+Studio → disk (pull), live long-polling, deleting folders or models (on purpose).

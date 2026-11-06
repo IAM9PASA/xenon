@@ -1,6 +1,6 @@
 # Xenon
 
-> Safe one-way file sync for Roblox: disk -> Roblox Studio. Never deletes anything in Studio. Luau CLI/server on Lune + a Luau Studio plugin. Rojo / Argon compatible project layout, full Wally support.
+> Safe one-way file sync for Roblox: disk -> Roblox Studio. Only deletes scripts whose files you delete while connected (unchanged in Studio), nothing else. Luau CLI/server on Lune + a Luau Studio plugin. Rojo / Argon compatible project layout, full Wally support.
 
 ## Docs
 

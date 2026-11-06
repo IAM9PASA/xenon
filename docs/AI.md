@@ -13,14 +13,14 @@ Machine-oriented reference. Every fact here matches the code in this repo (v0.3.
 
 | ID | Rule |
 | --- | --- |
-| I1 | Xenon MUST NOT delete, destroy or reparent away any existing Studio instance. No code path may call `Destroy`, `ClearAllChildren`, or set `Parent = nil` on Studio content. |
+| I1 | The only removal: `remove_scripts` sets `Parent = nil` (undoable, inside the recording) on a script whose file got a live `remove` change, when ALL hold: setting `sync_deletes` on, instance is a LuaSourceContainer of the entry's class, `checksum(Source) == entry.hash` (not edited in Studio, checked at plan and again at apply), no children. Otherwise it becomes a conflict / is kept. Full sync never removes. Folders, models and any other instance are never removed. No `Destroy` / `ClearAllChildren` anywhere. |
 | I2 | Scripts are created or updated only when the checksum differs (or `Enabled` differs). |
 | I3 | The first sync after Connect, any batch with a conflict, and live batches above `auto_apply_limit` (or any batch when `auto_apply` is off) MUST wait for the user's Apply. |
 | I4 | A script edited in Studio since Xenon last synced it, and also changed on disk, is a conflict and MUST NOT be overwritten. |
 | I5 | Models (`.rbxm`, `.rbxmx`, `.model.json`, `.txt`) are create-only. Existing ones are never replaced; changes are reported (`models_changed`). |
 | I6 | If `placeIds` is non-empty and `game.PlaceId` (non-zero) is not in it, the plugin refuses to sync. |
 | I7 | Every apply is one ChangeHistory recording named `Xenon sync` (one Ctrl+Z). |
-| I8 | The server has no endpoint that requests deletion. File removals are reported as `kind = "remove"` and only logged by the plugin. |
+| I8 | The server has no endpoint that requests deletion. File removals are reported as `kind = "remove"` changes; the plugin decides under I1. |
 | I9 | Never store secrets (API keys) in the repo. Asphalt reads `ASPHALT_API_KEY` from the environment. |
 
 ## 3. Architecture
@@ -181,9 +181,11 @@ Change = { version: number, kind: "create" | "update" | "remove", entry: PublicE
 
 **apply(plan):** fetch sources/trees for create+update in batches of 80 → one ChangeHistory recording (I7) → models: `build_model`; scripts: `ensure(path, class)` (creates missing ancestors as Folder, never removes), `ScriptEditorService:UpdateSourceAsync`, set `Enabled`.
 
-**poll_loop():** every `poll_seconds` one request: `/info` while a plan waits for Apply (heartbeat only), else `/changes`. Request fails → Live indicator "Reconnecting…" (once). Server back after a drop, `session` changed, or `resync` → `full_sync` (replaces a pending plan). While pending nothing else happens. `remove` changes → `warn` only (I8). Others → `plan_for(live = true)` → review if conflicts / auto_apply off / count > auto_apply_limit, else apply directly.
+**poll_loop():** every `poll_seconds` one request: `/info` while a plan waits for Apply (heartbeat only), else `/changes`. Request fails → Live indicator "Reconnecting…" (once). Server back after a drop, `session` changed, or `resync` → `full_sync` (replaces a pending plan). While pending nothing else happens. `remove` changes → `plan_removals` (I1), others → `plan_for(live = true)` → review if conflicts / auto_apply off / count > auto_apply_limit, else apply directly.
 
 **UI states** (dot color / big line): off grey "Not connected"; busy blue "Connecting…" "Comparing…" "Applying…"; ok green "In sync" / "Skipped"; review yellow "N changes ready"; error red "Server not running" / "Lost the server" / "Wrong place" / "Apply failed". Primary button: Connect → Apply (with Cancel) → Disconnect.
+
+**plan_removals(plan, removed):** live `remove` changes (last change per key wins, so delete + re-create is an update) → `plan.remove` or `plan.conflicts` per I1. Counts toward the auto-apply limit like creates/updates. `apply` runs `remove_scripts` first, deepest path first.
 
 **open_diff(entry):** list rows for create/update/conflict scripts are buttons. Click → `POST /sources {keys=[key]}` → `diff.lines(studio Source or "", disk source)` → `diff.fold(…, 3)` → rows (red `-` = Studio now, green `+` = disk), max 600 rows, yields every 100. A newer click or Back cancels drawing (`diff_token`). Read-only: never changes Studio.
 
@@ -196,6 +198,7 @@ Stored with `plugin:SetSetting("xenon_settings", table)`. Defined in `SETTING_LI
 | `port` | number | 34872 | 1-65535, must match `xenon serve --port` |
 | `auto_apply` | bool | true | apply small live batches without asking |
 | `auto_apply_limit` | number | 20 | 1-5000, larger live batches wait for Apply |
+| `sync_deletes` | bool | true | — |
 | `poll_seconds` | number | 0.5 | 0.1-10 |
 | `sync_models` | bool | true | include `.rbxm` / `.model.json` / `.txt` entries |
 | `log_output` | bool | true | print one line per applied batch |
@@ -219,7 +222,7 @@ Stored with `plugin:SetSetting("xenon_settings", table)`. Defined in `SETTING_LI
 
 ## 12. Known limits / not implemented
 
-- No Studio → disk (pull), no two-way sync, no deletes (by design, I1/I8).
+- No Studio → disk (pull), no two-way sync, no folder/model deletes (by design, I1/I8). Files deleted while the server was down are not detected (full sync never deletes).
 - Detection latency up to ~1.5 s (1 s server rescan + poll). Long-polling is the planned fix.
 - `.md`, `.csv`, `.png` and other files are ignored. Terrain, unions (CSG) and binary data in models are not supported (same as Argon).
 - Studio MCP `execute_luau` cannot reach localhost (Assistant HTTP allowlist), so the plugin can't be driven from MCP; test plugin logic by copying functions into an `execute_luau` call.

@@ -1,4 +1,4 @@
--- xenon studio plugin: files from disk -> studio. never deletes anything.
+-- xenon studio plugin: files from disk -> studio. only removes scripts whose files were deleted (see plan_removals).
 -- talks to `xenon serve` on localhost. built into Plugins/Xenon.rbxm by `xenon build`
 
 -- SERVICES -------------------------
@@ -28,6 +28,7 @@ local SETTING_LIST = {
 	{ key = "auto_apply", label = "Apply small changes automatically", hint = "Off = every change waits for Apply", kind = "bool", default = true },
 	{ key = "auto_apply_limit", label = "Ask first above this many changes", hint = "Bigger batches always wait for Apply", kind = "number", default = 20, min = 1, max = 5000 },
 	{ key = "poll_seconds", label = "Check for changes every (seconds)", hint = "Lower = faster updates, a bit more work", kind = "number", default = 0.5, min = 0.1, max = 10 },
+	{ key = "sync_deletes", label = "Remove scripts deleted on disk", hint = "Only while connected, only if unchanged in Studio. Ctrl+Z brings it back", kind = "bool", default = true },
 	{ key = "sync_models", label = "Sync models", hint = ".rbxm, .model.json and .txt files (created only, never replaced)", kind = "bool", default = true },
 	{ key = "log_output", label = "Print changes in Output", hint = "One line per applied batch", kind = "bool", default = true },
 	{ key = "icon_decal", label = "Toolbar icon (decal id)", hint = "Any decal id. Takes effect after a Studio restart", kind = "number", default = 57445653, min = 0, max = 1e15 },
@@ -59,7 +60,7 @@ local diff_token = nil -- newest diff request, older answers are dropped
 local DIFF_MAX_ROWS = 600
 
 local toolbar = plugin:CreateToolbar("Xenon")
-local toggle_button = toolbar:CreateButton("Xenon", "Sync files from disk (never deletes)", "")
+local toggle_button = toolbar:CreateButton("Xenon", "Sync files from disk into Studio", "")
 toggle_button.ClickableWhenViewportHidden = true
 
 local widget = plugin:CreateDockWidgetPluginGui(
@@ -201,6 +202,7 @@ local chip_update = chip(COLOR.blue)
 local chip_new = chip(COLOR.green)
 local chip_conflict = chip(COLOR.red)
 local chip_kept = chip(COLOR.yellow)
+local chip_remove = chip(COLOR.red)
 
 local list = make("ScrollingFrame", {
 	Position = UDim2.fromOffset(0, 106),
@@ -343,6 +345,7 @@ local function show_plan(plan)
 	set_chip(chip_new, #plan.create, "new")
 	set_chip(chip_conflict, #plan.conflicts, #plan.conflicts == 1 and "conflict" or "conflicts")
 	set_chip(chip_kept, #plan.skip + #plan.models_changed, "kept as is")
+	set_chip(chip_remove, #plan.remove, "delete")
 
 	local order, shown, limit = 0, 0, 150
 	local function rows(items, tag, color)
@@ -357,11 +360,12 @@ local function show_plan(plan)
 		end
 	end
 	rows(plan.conflicts, "CONFLICT", COLOR.red)
+	rows(plan.remove, "DELETE", COLOR.red)
 	rows(plan.update, "UPDATE", COLOR.blue)
 	rows(plan.create, "NEW", COLOR.green)
 	rows(plan.models_changed, "KEPT", COLOR.yellow)
 	rows(plan.skip, "SKIPPED", COLOR.dim)
-	local total = #plan.conflicts + #plan.update + #plan.create + #plan.models_changed + #plan.skip
+	local total = #plan.conflicts + #plan.remove + #plan.update + #plan.create + #plan.models_changed + #plan.skip
 	if total > shown then
 		order += 1
 		add_row("", COLOR.dim, `… and {total - shown} more`, order)
@@ -509,7 +513,12 @@ function open_diff(entry, tag: string, color: Color3)
 
 	local token = {}
 	diff_token = token
-	local result, err = request("POST", "/sources", { keys = { entry.key } })
+	local result, err
+	if tag == "DELETE" then
+		result = { [entry.key] = "" } -- file is gone on disk
+	else
+		result, err = request("POST", "/sources", { keys = { entry.key } })
+	end
 	if diff_token ~= token then
 		return -- another diff was opened meanwhile
 	end
@@ -524,7 +533,9 @@ function open_diff(entry, tag: string, color: Color3)
 	local edits = diff.lines(studio, disk)
 	local added, removed = diff.count(edits)
 
-	if added + removed == 0 then
+	if tag == "DELETE" then
+		diff_sub.Text = `DELETE  ·  file removed on disk, Apply removes these {removed} lines from Studio`
+	elseif added + removed == 0 then
 		diff_sub.Text = `{tag}  ·  same code, only Enabled changes (disabled on disk: {entry.disabled})`
 	elseif inst then
 		diff_sub.Text = `{tag}  ·  +{added}  -{removed}  ·  red = Studio now, green = disk`
@@ -701,7 +712,7 @@ end
 -- plan / apply ------------------------------
 
 local function plan_for(entries, live)
-	local plan = { create = {}, update = {}, conflicts = {}, skip = {}, models_changed = {} }
+	local plan = { create = {}, update = {}, conflicts = {}, skip = {}, models_changed = {}, remove = {} }
 	for i, entry in entries do
 		if entry.model and not settings.sync_models then
 			continue
@@ -741,6 +752,50 @@ local function plan_for(entries, live)
 	return plan
 end
 
+-- files deleted on disk during a live session. only scripts, only if studio still has exactly
+-- what disk had (not edited in studio), never folders / models / anything else
+local function plan_removals(plan, removed)
+	if not settings.sync_deletes then
+		return
+	end
+	for _, entry in removed do
+		if entry.folder or entry.model then
+			continue
+		end
+		local inst = find(entry.path)
+		if not inst or not inst:IsA("LuaSourceContainer") or inst.ClassName ~= entry.class then
+			continue
+		end
+		if checksum(inst.Source) == entry.hash then
+			table.insert(plan.remove, entry)
+		else
+			table.insert(plan.conflicts, entry) -- edited in studio, keep it
+		end
+	end
+end
+
+local function remove_scripts(entries): number
+	-- deepest first, so an init script whose children were removed too can go after them
+	local sorted = table.clone(entries)
+	table.sort(sorted, function(a, b)
+		return #a.path > #b.path
+	end)
+	local removed = 0
+	for _, entry in sorted do
+		local inst = find(entry.path)
+		-- check again right before: unchanged script without children
+		if inst and inst:IsA("LuaSourceContainer") and inst.ClassName == entry.class
+			and checksum(inst.Source) == entry.hash and #inst:GetChildren() == 0 then
+			inst.Parent = nil -- inside the recording, so Ctrl+Z puts it back
+			known_hash[entry.key] = nil
+			removed += 1
+		else
+			warn(`[xenon] kept {entry.key} (changed in Studio or has children)`)
+		end
+	end
+	return removed
+end
+
 local function apply(plan)
 	local todo = {}
 	for _, entry in plan.create do
@@ -756,6 +811,7 @@ local function apply(plan)
 	end
 
 	local recording = ChangeHistoryService:TryBeginRecording("Xenon sync")
+	local removed = remove_scripts(plan.remove)
 	for _, entry in todo do
 		if entry.model then
 			local tree = sources[entry.key]
@@ -782,7 +838,7 @@ local function apply(plan)
 	if recording then
 		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
 	end
-	log(`applied {#plan.update} update(s), {#plan.create} new, deleted 0`)
+	log(`applied {#plan.update} update(s), {#plan.create} new, {removed} deleted`)
 	return true
 end
 
@@ -795,12 +851,13 @@ end
 
 local function show_review(plan)
 	pending = plan
-	local count = #plan.create + #plan.update
+	local count = #plan.create + #plan.update + #plan.remove
+	local deletes = #plan.remove > 0 and ` {#plan.remove} script(s) deleted on disk will be removed.` or " Nothing is deleted."
 	set_status(
 		"review",
 		count == 1 and "1 change ready" or `{count} changes ready`,
-		#plan.conflicts > 0 and "Some scripts were edited in Studio and on disk. Those (red) are left alone. Apply brings in the rest. Nothing is deleted."
-			or "Click a script to see what changes. Apply brings them into Studio. Nothing is deleted, Ctrl+Z undoes it."
+		#plan.conflicts > 0 and `Some scripts were edited in Studio and on disk. Those are left alone. Apply brings in the rest.{deletes}`
+			or `Click a script to see what changes. Apply brings them into Studio.{deletes} Ctrl+Z undoes it.`
 	)
 	show_plan(plan)
 	refresh_buttons()
@@ -864,7 +921,7 @@ local function disconnect()
 	set_live("off")
 	show_page("main")
 	clear_list()
-	for _, c in { chip_update, chip_new, chip_conflict, chip_kept } do
+	for _, c in { chip_update, chip_new, chip_conflict, chip_kept, chip_remove } do
 		c.Visible = false
 	end
 	set_status("off", "Not connected", "Run `xenon serve` in your game folder, then press Connect.")
@@ -906,19 +963,26 @@ function poll_loop(my_id: number)
 			continue
 		end
 
-		local entries = {}
+		-- last change per key wins (delete + re-create = update)
+		local last = {}
+		local order = {}
 		for _, change in result.changes or {} do
-			if change.kind == "remove" then
-				warn(`[xenon] file removed on disk, kept in studio: {change.entry.key}`)
-			else
-				table.insert(entries, change.entry)
+			if not last[change.entry.key] then
+				table.insert(order, change.entry.key)
 			end
+			last[change.entry.key] = change
+		end
+		local entries, removed = {}, {}
+		for _, key in order do
+			local change = last[key]
+			table.insert(change.kind == "remove" and removed or entries, change.entry)
 		end
 		version = result.version
 
-		if #entries > 0 then
+		if #entries + #removed > 0 then
 			local plan = plan_for(entries, true)
-			local count = #plan.create + #plan.update
+			plan_removals(plan, removed)
+			local count = #plan.create + #plan.update + #plan.remove
 			local needs_review = #plan.conflicts > 0 or not settings.auto_apply or count > settings.auto_apply_limit
 			if needs_review and (count > 0 or #plan.conflicts > 0) then
 				show_review(plan)

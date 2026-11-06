@@ -765,7 +765,8 @@ local function plan_removals(plan, removed)
 		return
 	end
 	for _, entry in removed do
-		if entry.folder or entry.model then
+		-- wally owns _Index: `wally install` wipes and refills it, old versions there are harmless
+		if entry.folder or entry.model or entry.key:find("/_Index/", 1, true) then
 			continue
 		end
 		local inst = find(entry.path)
@@ -816,8 +817,29 @@ local function apply(plan)
 		return false
 	end
 
+	-- last check before deleting: the server must still have no file for it (it may be back by now)
+	local to_remove = {}
+	if #plan.remove > 0 then
+		local keys = {}
+		for _, entry in plan.remove do
+			table.insert(keys, entry.key)
+		end
+		local back, back_err = request("POST", "/sources", { keys = keys })
+		if not back then
+			set_status("error", "Apply failed", `Could not check deleted files with the server.\n{back_err}`)
+			return false
+		end
+		for _, entry in plan.remove do
+			if back[entry.key] == nil then
+				table.insert(to_remove, entry)
+			else
+				log(`kept {entry.key}: the file is back on disk`)
+			end
+		end
+	end
+
 	local recording = ChangeHistoryService:TryBeginRecording("Xenon sync")
-	local removed = remove_scripts(plan.remove)
+	local removed = remove_scripts(to_remove)
 	for _, entry in todo do
 		if entry.model then
 			local tree = sources[entry.key]

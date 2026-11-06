@@ -12,7 +12,7 @@ local process = require("@lune/process")
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.6.0"
+local VERSION = "0.6.1"
 local DEFAULT_PORT = 34872
 
 local args = process.args
@@ -21,7 +21,7 @@ local command = args[1] or "help"
 local caller_dir = process.env.XENON_CWD or process.cwd
 
 local HELP = [[
-xenon - safe roblox script sync, disk -> studio. never deletes.
+xenon - safe roblox script sync: disk -> studio live, studio -> disk on Pull.
 
 usage:
   xenon serve [project.json] [--port N]   start syncing (run it in your game folder)

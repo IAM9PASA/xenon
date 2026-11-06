@@ -158,7 +158,7 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 
 ## Safety rules
 
-1. **Deletes only what you deleted.** A script is removed only when its file is deleted while connected, Studio still has exactly the disk version, and it has no children. Connect / full sync never deletes, folders and models are never deleted
+1. **Deletes only what you deleted.** A script is removed only when its file is deleted while connected, Studio still has exactly the disk version, and it has no children. Connect / full sync never deletes, folders and models are never deleted. A file must stay gone for ~5 s first (so `wally install` refilling Packages/ is not a delete), and Wally `_Index` is never touched
 2. **Only sends real changes.** Both sides compare a checksum of the code.
 3. **Shows first.** First connect and big batches wait for Apply.
 4. **Protects Studio edits.** Edited in both places → conflict, untouched.

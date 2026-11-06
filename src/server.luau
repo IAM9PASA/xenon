@@ -25,6 +25,7 @@ local pull = require("./pull")
 
 local POLL_SECONDS = 1
 local MAX_LOG = 2000
+local REMOVE_AFTER = 5 -- rescans (~5 s) a file must stay gone before it is reported deleted
 
 local project -- set by server.start
 local cache = {}
@@ -32,6 +33,7 @@ local current = {} -- key -> entry
 local version = 0
 local session = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) -- new id every server start
 local log = {} -- { version, kind, entry }
+local missing = {} -- key -> { entry, scans }: gone from disk, not reported yet
 
 
 -- FUNCTIONS -------------------------
@@ -71,16 +73,28 @@ local function rescan()
 	local fresh = index(mapping.snapshot(project, cache))
 
 	for key, entry in fresh do
-		local old = current[key]
+		-- back within the grace time: compare with what it was before it went missing
+		local old = current[key] or (missing[key] and missing[key].entry)
+		missing[key] = nil
 		if not old then
 			record("create", entry)
 		elseif entry.hash ~= old.hash or entry.class ~= old.class or entry.disabled ~= old.disabled then
 			record("update", entry)
 		end
 	end
+
+	-- a file counts as deleted only after REMOVE_AFTER rescans in a row without it.
+	-- `wally install` wipes Packages/ and refills it over a few seconds, editors save by rename
 	for key, entry in current do
 		if not fresh[key] then
-			record("remove", entry)
+			missing[key] = { entry = entry, scans = 0 }
+		end
+	end
+	for key, item in missing do
+		item.scans += 1
+		if item.scans >= REMOVE_AFTER then
+			record("remove", item.entry)
+			missing[key] = nil
 		end
 	end
 
@@ -207,7 +221,7 @@ function server.start(project_file: string, port: number)
 		return json({ error = tostring(response) }, 500)
 	end)
 
-	print(`[xenon] serving "{project.name}" on http://localhost:{port}  ({count} scripts, never deletes)`)
+	print(`[xenon] serving "{project.name}" on http://localhost:{port}  ({count} scripts)`)
 	print("[xenon] studio: Plugins tab -> Xenon -> Connect.  stop: Ctrl+C")
 
 	while true do

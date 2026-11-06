@@ -1,0 +1,5 @@
+# build output, rebuild with: lune run build_plugin.luau
+Xenon.rbxm
+
+# created and removed by tests/mapping_test.luau
+tests/_fixture/

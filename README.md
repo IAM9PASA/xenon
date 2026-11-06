@@ -136,6 +136,7 @@ Same rules as Rojo and Argon, so existing projects just work.
 | `Folder/init.server.luau` (or `.client` / plain) | the folder itself becomes that script, other files become its children |
 | `Folder/init.meta.json` `{"className": "ScreenGui"}` | the folder becomes that class |
 | `Name.meta.json` `{"properties": {"Disabled": true}}` | the script starts disabled |
+| `Name.meta.json` `{"properties": {"RunContext": "Client"}}` | the script's RunContext (Legacy / Server / Client / Plugin) |
 | first line `--disable` | the script starts disabled |
 | `Folder/default.project.json` | nested project (every Wally package) |
 | `Name.rbxm` / `Name.rbxmx` | the model inside (one root → renamed to `Name`) |

@@ -113,10 +113,14 @@ local function push_script(out, path, class, file, meta, cache, source_override)
 		return { source = source, hash = checksum(source) }
 	end)
 
-	-- modules have no Enabled property, so they carry no flag at all
-	local disabled = nil
+	-- modules have no Enabled / RunContext, so they carry neither
+	local disabled, run_context = nil, nil
 	if class ~= "ModuleScript" then
 		disabled = is_disabled(meta, item.source)
+		local props = meta and meta.properties
+		if props and type(props.RunContext) == "string" then
+			run_context = props.RunContext -- "Legacy" | "Server" | "Client" | "Plugin"
+		end
 	end
 	table.insert(out, {
 		key = table.concat(path, "/"),
@@ -125,6 +129,7 @@ local function push_script(out, path, class, file, meta, cache, source_override)
 		source = item.source,
 		hash = item.hash,
 		disabled = disabled,
+		run_context = run_context,
 		file = file,
 		data = source_override ~= nil or nil, -- generated from .json / .toml: never pulled back
 	})

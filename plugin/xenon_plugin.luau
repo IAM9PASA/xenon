@@ -555,7 +555,7 @@ function open_diff(entry, tag: string, color: Color3)
 	elseif tag == "DELETE" then
 		diff_sub.Text = `DELETE  ·  file removed on disk, Apply removes these {removed} lines from Studio`
 	elseif added + removed == 0 then
-		diff_sub.Text = `{tag}  ·  same code, only Enabled changes (disabled on disk: {entry.disabled})`
+		diff_sub.Text = `{tag}  ·  same code, only Enabled / RunContext change (disabled: {entry.disabled}, RunContext: {entry.run_context or "-"})`
 	elseif inst then
 		diff_sub.Text = `{tag}  ·  +{added}  -{removed}  ·  red = Studio now, green = disk`
 	else
@@ -752,7 +752,8 @@ local function plan_for(entries, live)
 		else
 			local current = checksum(inst.Source)
 			local enabled_differs = entry.disabled ~= nil and inst.Enabled == entry.disabled
-			if current ~= entry.hash or enabled_differs then
+			local context_differs = entry.run_context ~= nil and inst:IsA("Script") and inst.RunContext.Name ~= entry.run_context
+			if current ~= entry.hash or enabled_differs or context_differs then
 				-- live: studio changed since our last sync -> someone edited it in studio, keep it
 				local last = known_hash[entry.key]
 				if live and last and current ~= last and current ~= entry.hash then
@@ -870,6 +871,11 @@ local function apply(plan)
 					return source
 				end)
 				known_hash[entry.key] = entry.hash
+			end
+			if entry.run_context and inst:IsA("Script") then
+				pcall(function()
+					inst.RunContext = (Enum.RunContext :: any)[entry.run_context]
+				end)
 			end
 			if entry.disabled ~= nil and inst:IsA("BaseScript") then
 				inst.Enabled = not entry.disabled

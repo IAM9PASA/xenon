@@ -90,6 +90,8 @@ Errors exit with code 1 and a `[xenon] ...` message (e.g. missing project file).
 
 Entry order: parents before children (server `/snapshot` sorts by path length, then key).
 
+Script `.meta.json` / `init.meta.json` `properties`: `Disabled` (or `Enabled = false`) → `disabled`; `RunContext` (string) → `run_context`, applied by the plugin as `Enum.RunContext[name]` and compared like `Enabled`. Other properties are ignored.
+
 ### Entry shape (server side)
 
 ```lua

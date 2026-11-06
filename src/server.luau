@@ -53,6 +53,7 @@ local function public(entry, with_source: boolean?)
 		class = entry.class,
 		hash = entry.hash,
 		disabled = entry.disabled,
+		run_context = entry.run_context,
 		folder = entry.folder,
 		model = entry.model ~= nil or nil,
 		data = entry.data,
@@ -78,7 +79,7 @@ local function rescan()
 		missing[key] = nil
 		if not old then
 			record("create", entry)
-		elseif entry.hash ~= old.hash or entry.class ~= old.class or entry.disabled ~= old.disabled then
+		elseif entry.hash ~= old.hash or entry.class ~= old.class or entry.disabled ~= old.disabled or entry.run_context ~= old.run_context then
 			record("update", entry)
 		end
 	end

@@ -17,6 +17,11 @@ local files = {
 	["src/server/util.luau"] = "return {}",
 	["src/server/off.server.luau"] = "print('off')",
 	["src/server/off.meta.json"] = '{"properties":{"Disabled":true}}',
+	["src/server/worker.server.luau"] = "print('worker')",
+	["src/server/worker.meta.json"] = '{"properties":{"Disabled":true,"RunContext":"Client"}}',
+	["src/server/mod_ctx.luau"] = "return 1",
+	["src/server/mod_ctx.meta.json"] = '{"properties":{"RunContext":"Client"}}',
+
 	["src/server/flagged.server.luau"] = "--disable\nprint('flag')",
 	["src/server/data.json"] = "{}",
 	["src/server/model.rbxm"] = "binary",
@@ -64,6 +69,9 @@ check("server script", by_key["ServerScriptService/main"] and by_key["ServerScri
 check("module", by_key["ServerScriptService/util"] and by_key["ServerScriptService/util"].class == "ModuleScript")
 check("meta disabled", by_key["ServerScriptService/off"] and by_key["ServerScriptService/off"].disabled == true)
 check("--disable line", by_key["ServerScriptService/flagged"] and by_key["ServerScriptService/flagged"].disabled == true)
+check("meta RunContext", by_key["ServerScriptService/worker"] and by_key["ServerScriptService/worker"].run_context == "Client" and by_key["ServerScriptService/worker"].disabled == true)
+check("no RunContext on modules", by_key["ServerScriptService/mod_ctx"] and by_key["ServerScriptService/mod_ctx"].run_context == nil)
+check("no RunContext without meta", by_key["ServerScriptService/main"].run_context == nil)
 check("enabled by default", by_key["ServerScriptService/main"].disabled == false)
 check("json -> data module", by_key["ServerScriptService/data"] and by_key["ServerScriptService/data"].class == "ModuleScript")
 check("broken rbxm skipped, no crash", by_key["ServerScriptService/model"] == nil)

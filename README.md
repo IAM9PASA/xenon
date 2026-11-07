@@ -133,6 +133,7 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| On Connect, take data from | Server | **Server** = files on disk go into Studio (the normal Apply review). **Studio** = Connect opens the Pull review instead, so Studio scripts are written to disk (Write to disk). After that, live sync works as usual. Files that only exist on disk are not pushed into Studio on a Studio-mode Connect |
 | Auto-accept (never ask) | Off | On = every change goes in without Apply, also on Connect. Same as the **Auto** button. Conflicts are still left alone |
 | Server port | `34872` | Must match `xenon serve --port` |
 | Apply small changes automatically | On | Off = every change waits for Apply |

@@ -185,7 +185,7 @@ Change = { version: number, kind: "create" | "update" | "remove", entry: PublicE
 
 **apply_or_review(plan, needs_review):** the single decision point for full sync (needs_review = true) and live batches. Review only if needs_review and not `auto_accept` and there is something to apply; else apply (conflicts excluded) → "In sync" (status mentions kept conflicts).
 
-**connect():** `GET /info` → place check (I6) → `full_sync()` → start `poll_loop(loop_id)` (always, even if the first sync failed). `loop_id` bumps on connect/disconnect so an old loop exits.
+**connect():** `GET /info` → place check (I6) → `full_sync()` (setting `connect_source = "server"`, default) or, for `"studio"`, `version = info.version` then `start_pull()` (the pull review, always waits for Write to disk) → start `poll_loop(loop_id)` (always, even if the first sync failed). `loop_id` bumps on connect/disconnect so an old loop exits.
 
 **full_sync():** `GET /snapshot` → `plan_for(entries, live = false)` → nothing to do: "In sync"; else `show_review` (waits for Apply, I3).
 

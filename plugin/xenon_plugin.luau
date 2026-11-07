@@ -25,6 +25,7 @@ local SETTINGS_KEY = "xenon_settings"
 -- every setting the Settings page shows. order = page order
 local SETTING_LIST = {
 	{ key = "auto_accept", label = "Auto-accept (never ask)", hint = "Every change goes in without Apply, also on Connect. Conflicts are still left alone", kind = "bool", default = false },
+	{ key = "connect_source", label = "On Connect, take data from", hint = "Server = files on disk go into Studio. Studio = Studio scripts are written to disk", kind = "choice", options = { "server", "studio" }, labels = { server = "Server", studio = "Studio" }, default = "server" },
 	{ key = "port", label = "Server port", hint = "Must match `xenon serve --port` (default 34872)", kind = "number", default = 34872, min = 1, max = 65535 },
 	{ key = "auto_apply", label = "Apply small changes automatically", hint = "Off = every change waits for Apply", kind = "bool", default = true },
 	{ key = "auto_apply_limit", label = "Ask first above this many changes", hint = "Bigger batches always wait for Apply", kind = "number", default = 20, min = 1, max = 5000 },
@@ -85,6 +86,8 @@ local function load_settings()
 		if item.kind == "number" and type(value) == "number" then
 			settings[item.key] = math.clamp(value, item.min, item.max)
 		elseif item.kind == "bool" and type(value) == "boolean" then
+			settings[item.key] = value
+		elseif item.kind == "choice" and table.find(item.options, value) then
 			settings[item.key] = value
 		else
 			settings[item.key] = item.default
@@ -1200,10 +1203,18 @@ local function connect()
 	server_ok = true
 	session = info.session
 	project = { name = info.name, folder = info.folder }
-	log(`connected to "{info.name}"{info.folder and " (" .. info.folder .. ")" or ""}`)
+	log(`connected to "{info.name}"{info.folder and " (" .. info.folder .. ")" or ""}, data from {settings.connect_source}`)
 	loop_id += 1
 	refresh_buttons()
-	full_sync()
+	if settings.connect_source == "studio" then
+		-- studio is the source: review studio -> disk first. live sync then starts from the server's
+		-- current version, so files that only exist on disk are not pushed into studio on connect
+		version = info.version or 0
+		set_live("live")
+		start_pull()
+	else
+		full_sync()
+	end
 	task.spawn(poll_loop, loop_id) -- runs even if the first sync failed: it reconnects by itself
 end
 
@@ -1314,7 +1325,29 @@ local function build_settings_page()
 		text({ Position = UDim2.fromOffset(0, 7), Size = UDim2.new(1, -96, 0, 20), Font = Enum.Font.BuilderSansBold, TextSize = 14, Text = item.label }, row)
 		text({ Position = UDim2.fromOffset(0, 27), Size = UDim2.new(1, -96, 0, 18), TextSize = 12, TextColor3 = COLOR.dim, Text = item.hint, TextTruncate = Enum.TextTruncate.AtEnd }, row)
 
-		if item.kind == "bool" then
+		if item.kind == "choice" then
+			local choice = make("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.fromScale(1, 0.5),
+				Size = UDim2.fromOffset(84, 28),
+				BorderSizePixel = 0,
+				BackgroundColor3 = COLOR.blue,
+				Font = Enum.Font.BuilderSansBold,
+				TextSize = 14,
+				TextColor3 = Color3.new(1, 1, 1),
+			}, row)
+			corner(choice, 14)
+			local function paint()
+				choice.Text = item.labels[settings[item.key]] or settings[item.key]
+			end
+			paint()
+			choice.MouseButton1Click:Connect(function()
+				local index = table.find(item.options, settings[item.key]) or 0
+				settings[item.key] = item.options[index % #item.options + 1]
+				save_settings()
+				paint()
+			end)
+		elseif item.kind == "bool" then
 			local toggle = make("TextButton", {
 				AnchorPoint = Vector2.new(1, 0.5),
 				Position = UDim2.fromScale(1, 0.5),

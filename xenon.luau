@@ -17,7 +17,7 @@ local assets = require("./src/assets")
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.9.0"
+local VERSION = "0.9.1"
 local DEFAULT_PORT = 34872
 
 local args = process.args

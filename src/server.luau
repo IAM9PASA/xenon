@@ -13,6 +13,7 @@
 local net = require("@lune/net")
 local serde = require("@lune/serde")
 local task = require("@lune/task")
+local process = require("@lune/process")
 
 
 -- MODULES -------------------------
@@ -213,7 +214,7 @@ function server.start(project_file: string, port: number)
 		end
 	end
 
-	net.serve(port, function(request)
+	local served, serve_error = pcall(net.serve, port, function(request)
 		local ok, response = pcall(handle, request)
 		if ok then
 			return response
@@ -221,6 +222,16 @@ function server.start(project_file: string, port: number)
 		warn("[xenon] request failed: " .. tostring(response))
 		return json({ error = tostring(response) }, 500)
 	end)
+	if not served then
+		local message = tostring(serve_error)
+		if message:find("10048", 1, true) or message:lower():find("address already in use", 1, true) then
+			print(`[xenon] port {port} is already in use: another xenon serve is probably still running (another terminal, or a game folder you synced before).`)
+			print(`[xenon] stop that one (Ctrl+C in its terminal), or use another port: xenon serve --port {port + 1}  (and set the same port in the plugin's settings)`)
+		else
+			print(`[xenon] can't start the server on port {port}: {message}`)
+		end
+		process.exit(1)
+	end
 
 	print(`[xenon] serving "{project.name}" on http://localhost:{port}  ({count} scripts)`)
 	print("[xenon] studio: Plugins tab -> Xenon -> Connect.  stop: Ctrl+C")

@@ -124,7 +124,7 @@ Edited scripts in Studio, or made new ones? Press **Pull from Studio**:
 3. Press **Write to disk**. Check with `git diff`, git is your undo here
 
 It only writes scripts. It never deletes, renames or moves a file, never overwrites a file when creating one, and never writes into Wally packages or `.json` / `.toml` data files.
-New scripts are only written where their parent folder is already on disk; scripts inside Studio-only things (models, tools, UI not in `src`) are skipped and counted.
+New scripts are written where their parent is on disk, or inside plain Folders (those folders are created, e.g. `ServerScriptService/services/`). Scripts inside models, tools, UI or Wally packages are skipped and counted.
 A script with child scripts becomes `Name/init.server.luau` with the children inside. Disabled scripts get a `.meta.json`.
 
 ### Settings

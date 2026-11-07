@@ -3,7 +3,9 @@
 -- wally packages (nested default.project.json, _Index) or .json / .toml data modules.
 --
 --   pull.run(project, current, items, dry) -> { written = { key -> file }, refused = { key -> reason } }
---   item = { key, path, class, source?, has_children?, disabled? }   (source not needed when dry)
+--   item = { key, path, class, source?, has_children?, disabled?, folder_parents? }   (source not needed when dry)
+--   folder_parents: the plugin saw that every parent missing on disk is a plain Folder in studio,
+--   so those folders may be created (never over a mapped root, a script file, _Index or a taken name)
 
 local fs = require("@lune/fs")
 
@@ -59,6 +61,53 @@ local function write_source(file: string, source: string)
 	fs.writeFile(file, source)
 end
 
+-- creates (or, when dry, plans) the missing folders above a new script. returns its dir or nil, reason
+local function make_parents(project, path: { string }, dirs, root_keys, current, dry: boolean): (string?, string?)
+	local missing = {}
+	local n = #path - 1
+	while n >= 1 do
+		local key = table.concat(path, "/", 1, n)
+		if dirs[key] then
+			break
+		end
+		if root_keys[key] then
+			return nil, "its folder is mapped to a path that doesn't exist yet (run wally install?)"
+		end
+		if current[key] then
+			return nil, "parent is a script file, make it a folder (init.luau) first"
+		end
+		table.insert(missing, 1, n)
+		n -= 1
+	end
+	if n < 1 then
+		return nil, "its parent folder is not on disk (Studio-only)"
+	end
+
+	local dir = dirs[table.concat(path, "/", 1, n)]
+	for _, i in missing do
+		local name = path[i]
+		if bad_name(name) or name == "_Index" then
+			return nil, `folder "{name}" can't be made on disk`
+		end
+		local ok, reason = writable_dir(project, dir)
+		if not ok then
+			return nil, reason
+		end
+		local next_dir = dir .. "/" .. name
+		if not fs.isDir(next_dir) then
+			if name_taken(dir, name) then
+				return nil, `a file named "{name}" is where its folder would go`
+			end
+			if not dry then
+				fs.writeDir(next_dir)
+			end
+		end
+		dirs[table.concat(path, "/", 1, i)] = next_dir -- siblings reuse it (dry runs too)
+		dir = next_dir
+	end
+	return dir
+end
+
 local DISABLED_META = '{\n  "properties": {\n    "Disabled": true\n  }\n}\n'
 
 function pull.run(project, current, items, dry: boolean)
@@ -75,6 +124,10 @@ function pull.run(project, current, items, dry: boolean)
 		if entry.dir then
 			dirs[key] = entry.dir
 		end
+	end
+	local root_keys = {}
+	for _, root in project.roots do
+		root_keys[table.concat(root.path, "/")] = true
 	end
 
 	local sorted = table.clone(items)
@@ -124,14 +177,22 @@ function pull.run(project, current, items, dry: boolean)
 			local name = item.path[#item.path]
 			local parent_key = table.concat(item.path, "/", 1, #item.path - 1)
 			local dir = dirs[parent_key]
+			if bad_name(name) then
+				refused[key] = `name "{name}" can't be a file name`
+				continue
+			end
+			if not dir and item.folder_parents then
+				local made, reason = make_parents(project, item.path, dirs, root_keys, current, dry)
+				if not made then
+					refused[key] = reason
+					continue
+				end
+				dir = made
+			end
 			if not dir then
 				local parent = current[parent_key]
 				refused[key] = parent and "parent is a script file, make it a folder (init.luau) first"
 					or "its parent folder is not on disk (Studio-only)"
-				continue
-			end
-			if bad_name(name) then
-				refused[key] = `name "{name}" can't be a file name`
 				continue
 			end
 			local ok, reason = writable_dir(project, dir)

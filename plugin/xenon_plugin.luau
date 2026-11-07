@@ -953,6 +953,17 @@ local function show_pull_review(plan, studio_only: number)
 	refresh_buttons()
 end
 
+-- the server gets plain data: drop the Instance the plugin keeps on each item
+local function strip_instances(items)
+	local out = {}
+	for _, item in items do
+		local copy = table.clone(item)
+		copy.instance = nil
+		table.insert(out, copy)
+	end
+	return out
+end
+
 -- compares studio scripts under the mapped roots with the files, asks the server (dry run) what it may write
 local function start_pull()
 	set_status("busy", "Reading Studio…", "Looking for scripts that differ from your files.")
@@ -992,7 +1003,7 @@ local function start_pull()
 
 			local entry = by_key[key]
 			local current = checksum(inst.Source)
-			local item = { key = key, path = path, class = inst.ClassName, pull = true, exists = entry ~= nil }
+			local item = { key = key, path = path, class = inst.ClassName, pull = true, exists = entry ~= nil, instance = inst }
 			if inst:IsA("BaseScript") then
 				item.disabled = not inst.Enabled
 			end
@@ -1024,6 +1035,23 @@ local function start_pull()
 		end
 		local parent_key = table.concat(item.path, "/", 1, #item.path - 1)
 		local parent = by_key[parent_key]
+		if not (roots[parent_key] or new_keys[parent_key] or parent) then
+			-- parents missing on disk: fine when they are all plain Folders up to something on disk
+			local node = item.instance.Parent
+			local ok = false
+			while node and node ~= game and node:IsA("Folder") and node.Name ~= "_Index" do
+				node = node.Parent
+				local key = table.concat(path_of(node), "/")
+				if roots[key] or (by_key[key] and by_key[key].folder) then
+					ok = true
+					break
+				end
+			end
+			if ok then
+				item.folder_parents = true
+				parent = { folder = true }
+			end
+		end
 		if roots[parent_key] or new_keys[parent_key] or (parent and not parent.model) then
 			for other in new_keys do
 				if other:sub(1, #item.key + 1) == item.key .. "/" then
@@ -1037,7 +1065,7 @@ local function start_pull()
 		end
 	end
 
-	local verdict, verdict_err = request("POST", "/pull", { dry = true, items = filtered })
+	local verdict, verdict_err = request("POST", "/pull", { dry = true, items = strip_instances(filtered) })
 	if not verdict then
 		set_status("error", "Pull failed", tostring(verdict_err))
 		return
@@ -1076,7 +1104,7 @@ local function apply_pull(plan)
 	local written, refused = 0, 0
 	for i = 1, #todo, SOURCE_BATCH do
 		local chunk = table.move(todo, i, math.min(i + SOURCE_BATCH - 1, #todo), 1, {})
-		local result, err = request("POST", "/pull", { dry = false, items = chunk })
+		local result, err = request("POST", "/pull", { dry = false, items = strip_instances(chunk) })
 		if not result then
 			set_status("error", "Pull failed", `Wrote {written} file(s) before the server stopped answering.\n{err}`)
 			return false

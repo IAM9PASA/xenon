@@ -1,4 +1,4 @@
--- packs the plugin (plugin/xenon_plugin.luau + checksum + diff modules) into Xenon.rbxm
+-- packs the plugin (plugin/xenon_plugin.luau + checksum + diff + tree modules) into Xenon.rbxm
 -- and installs it into studio's Plugins folder.
 --   xenon build    from a source checkout (also writes Xenon.rbxm in the xenon folder)
 --   xenon plugin   from anywhere, the release exe uses the copy baked into it
@@ -26,7 +26,7 @@ return function(write_local: boolean?)
 	plugin_script.Name = "Xenon"
 	plugin_script.Source = sources.main
 
-	for _, name in { "checksum", "diff" } do
+	for _, name in { "checksum", "diff", "tree" } do
 		local module = roblox.Instance.new("ModuleScript")
 		module.Name = name
 		module.Source = sources[name]

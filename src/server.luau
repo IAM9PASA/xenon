@@ -3,7 +3,7 @@
 -- api (json, localhost only):
 --   GET  /info              { name, placeIds, version, session, scripts, folder }
 --   GET  /snapshot          { version, entries = [{ key, path, class, hash, disabled, folder }] }   no sources
---   POST /sources {keys}    { [key] = source }
+--   POST /sources {keys}    { [key] = source | model tree | true (folder) }
 --   GET  /changes?since=N   { version, resync?, changes = [{ version, kind, entry(+source) }] }
 -- there is no delete endpoint: removed files are reported as "remove" and the plugin keeps the instance
 -- models (.rbxm / .model.json / .txt) come back from /sources as instance trees, scripts as source strings
@@ -72,9 +72,18 @@ local function record(kind: string, entry)
 end
 
 local function rescan()
-	local fresh = index(mapping.snapshot(project, cache))
+	local list = mapping.snapshot(project, cache)
+	local fresh = index(list)
 
-	for key, entry in fresh do
+	-- parents before children, so the plugin never has to guess a container
+	table.sort(list, function(a, b)
+		if #a.path ~= #b.path then
+			return #a.path < #b.path
+		end
+		return a.key < b.key
+	end)
+	for _, entry in list do
+		local key = entry.key
 		-- back within the grace time: compare with what it was before it went missing
 		local old = current[key] or (missing[key] and missing[key].entry)
 		missing[key] = nil
@@ -153,7 +162,7 @@ local function handle(request)
 		for _, key in body.keys do
 			local entry = current[key]
 			if entry then
-				out[key] = entry.source or entry.model
+				out[key] = entry.source or entry.model or (entry.folder and true) or nil -- true: folder still on disk
 			end
 		end
 		return json(out)
@@ -202,10 +211,24 @@ end
 
 local server = {}
 
+-- loads the project and does the first scan. a fresh run: new session, version 0, empty log.
+-- tests call init / rescan / handle directly, without the http server
+function server.init(project_file: string)
+	project = mapping.load_project(project_file)
+	cache = {}
+	version = 0
+	log = {}
+	missing = {}
+	session = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
+	current = index(mapping.snapshot(project, cache))
+end
+
+server.rescan = rescan
+server.handle = handle
+
 -- blocks forever: initial scan, http server, rescan loop
 function server.start(project_file: string, port: number)
-	project = mapping.load_project(project_file)
-	current = index(mapping.snapshot(project, cache))
+	server.init(project_file)
 
 	local count = 0
 	for _, entry in current do

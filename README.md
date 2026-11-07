@@ -198,7 +198,7 @@ Xenon follows each package's own `default.project.json`, so `require(ReplicatedS
 
 ## Safety rules
 
-1. **Deletes only what you deleted.** A script is removed only when its file is deleted while connected, Studio still has exactly the disk version, and it has no children. Connect / full sync never deletes, folders and models are never deleted. A file must stay gone for ~5 s first (so `wally install` refilling Packages/ is not a delete), and Wally `_Index` is never touched
+1. **Deletes only what you deleted.** A script is removed only when its file is deleted while connected, Studio still has exactly the disk version, and it has no children. Connect / full sync never deletes, models are never deleted, and a folder only when it's empty (anything Studio-only inside keeps it). A file must stay gone for ~5 s first (so `wally install` refilling Packages/ is not a delete). Uninstalling a Wally package removes it from `_Index` the same way
 2. **Only sends real changes.** Both sides compare a checksum of the code.
 3. **Shows first.** First connect and big batches wait for Apply.
 4. **Protects Studio edits.** Edited in both places → conflict, untouched.
@@ -248,8 +248,9 @@ xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 | `src/assets.luau` | plugin sources + template (from disk; baked in for the release binary) |
 | `tools/bundle.luau` | packs everything into `dist/xenon.luau` for `lune build` |
 | `.github/workflows/release.yml` | tag `vX.Y.Z` -> tests, binaries for windows / mac / linux, GitHub release |
-| `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
-| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau`, `init_test.luau` |
+| `plugin/xenon_plugin.luau` | the Studio side: UI, settings, connect, poll |
+| `plugin/tree.luau` | the Studio tree without UI: plan, apply, Folder ↔ script swaps, removals (tested in Lune) |
+| `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau`, `init_test.luau`, `live_test.luau` (server + plugin tree end to end) |
 | `docs/AI.md` | full spec for AI assistants |
 
 Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.

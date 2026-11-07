@@ -8,12 +8,13 @@ local assets = {}
 
 assets.bundled = false
 
--- { main, checksum, diff } source text for the plugin
+-- { main, checksum, diff, tree } source text for the plugin
 function assets.plugin()
 	return {
 		main = fs.readFile("plugin/xenon_plugin.luau"),
 		checksum = fs.readFile("src/checksum.luau"),
 		diff = fs.readFile("src/diff.luau"),
+		tree = fs.readFile("plugin/tree.luau"),
 	}
 end
 

@@ -15,6 +15,17 @@ local CollectionService = game:GetService("CollectionService")
 
 local checksum = require(script.checksum)
 local diff = require(script.diff)
+local tree = require(script.tree)({
+	root = game,
+	Instance = Instance,
+	checksum = checksum,
+	write_source = function(inst, source)
+		ScriptEditorService:UpdateSourceAsync(inst, function()
+			return source
+		end)
+	end,
+	yield = task.wait,
+})
 
 
 -- VARIABLES -------------------------
@@ -460,37 +471,9 @@ end
 
 -- studio tree -----------------------------
 
-local function service(name)
-	local ok, found = pcall(game.GetService, game, name)
-	return ok and found or game:FindFirstChild(name)
-end
-
-local function find(path)
-	local node = service(path[1])
-	for i = 2, #path do
-		if not node then
-			return nil
-		end
-		node = node:FindFirstChild(path[i])
-	end
-	return node
-end
-
--- creates missing ancestors as Folders, the last one as `class`. never removes or replaces anything
-local function ensure(path, class)
-	local node = service(path[1])
-	for i = 2, #path do
-		local child = node:FindFirstChild(path[i])
-		if not child then
-			local ok, created = pcall(Instance.new, i == #path and class or "Folder")
-			child = ok and created or Instance.new("Folder")
-			child.Name = path[i]
-			child.Parent = node
-		end
-		node = child
-	end
-	return node
-end
+local service = tree.service
+local find = tree.find
+local ensure = tree.ensure
 
 -- diff review -------------------------------
 
@@ -537,7 +520,7 @@ function open_diff(entry, tag: string, color: Color3)
 	local token = {}
 	diff_token = token
 	local result, err
-	if tag == "DELETE" or (entry.pull and not entry.exists) then
+	if tag == "DELETE" or entry.folder or (entry.pull and not entry.exists) then
 		result = { [entry.key] = "" } -- no file on disk
 	else
 		result, err = request("POST", "/sources", { keys = { entry.key } })
@@ -738,88 +721,18 @@ end
 -- plan / apply ------------------------------
 
 local function plan_for(entries, live)
-	local plan = { create = {}, update = {}, conflicts = {}, skip = {}, models_changed = {}, remove = {} }
-	for i, entry in entries do
-		if entry.model and not settings.sync_models then
-			continue
-		end
-		local inst = find(entry.path)
-		if not inst then
-			table.insert(plan.create, entry)
-		elseif entry.model then
-			-- models are only created, never replaced: report disk changes to models xenon made
-			local stamp = inst:GetAttribute("xenon_hash")
-			if stamp and stamp ~= entry.hash then
-				table.insert(plan.models_changed, entry.key)
-			end
-		elseif entry.folder then
-			-- container exists, nothing to sync
-		elseif not inst:IsA("LuaSourceContainer") or inst.ClassName ~= entry.class then
-			table.insert(plan.skip, entry.key)
-		else
-			local current = checksum(inst.Source)
-			local enabled_differs = entry.disabled ~= nil and inst.Enabled == entry.disabled
-			local context_differs = entry.run_context ~= nil and inst:IsA("Script") and inst.RunContext.Name ~= entry.run_context
-			if current ~= entry.hash or enabled_differs or context_differs then
-				-- live: studio changed since our last sync -> someone edited it in studio, keep it
-				local last = known_hash[entry.key]
-				if live and last and current ~= last and current ~= entry.hash then
-					table.insert(plan.conflicts, entry)
-				else
-					table.insert(plan.update, entry)
-				end
-			else
-				known_hash[entry.key] = current
-			end
-		end
-		if i % 150 == 0 then
-			task.wait()
-		end
-	end
-	return plan
+	return tree.plan(entries, live, known_hash, { sync_models = settings.sync_models })
 end
 
--- files deleted on disk during a live session. only scripts, only if studio still has exactly
--- what disk had (not edited in studio), never folders / models / anything else
+-- files deleted on disk during a live session (see tree.plan_removals)
 local function plan_removals(plan, removed)
-	if not settings.sync_deletes then
-		return
-	end
-	for _, entry in removed do
-		-- wally owns _Index: `wally install` wipes and refills it, old versions there are harmless
-		if entry.folder or entry.model or entry.key:find("/_Index/", 1, true) then
-			continue
-		end
-		local inst = find(entry.path)
-		if not inst or not inst:IsA("LuaSourceContainer") or inst.ClassName ~= entry.class then
-			continue
-		end
-		if checksum(inst.Source) == entry.hash then
-			table.insert(plan.remove, entry)
-		else
-			table.insert(plan.conflicts, entry) -- edited in studio, keep it
-		end
-	end
+	tree.plan_removals(plan, removed, { sync_deletes = settings.sync_deletes })
 end
 
-local function remove_scripts(entries): number
-	-- deepest first, so an init script whose children were removed too can go after them
-	local sorted = table.clone(entries)
-	table.sort(sorted, function(a, b)
-		return #a.path > #b.path
-	end)
-	local removed = 0
-	for _, entry in sorted do
-		local inst = find(entry.path)
-		-- check again right before: unchanged script without children
-		if inst and inst:IsA("LuaSourceContainer") and inst.ClassName == entry.class
-			and checksum(inst.Source) == entry.hash and #inst:GetChildren() == 0 then
-			inst.Parent = nil -- inside the recording, so Ctrl+Z puts it back
-			known_hash[entry.key] = nil
-			removed += 1
-		else
-			warn(`[xenon] kept {entry.key} (changed in Studio or has children)`)
-		end
+local function remove_entries(entries): number
+	local removed, kept = tree.remove(entries, known_hash)
+	for _, key in kept do
+		warn(`[xenon] kept {key} (changed in Studio or not empty)`)
 	end
 	return removed
 end
@@ -860,35 +773,13 @@ local function apply(plan)
 	end
 
 	local recording = ChangeHistoryService:TryBeginRecording("Xenon sync")
-	local removed = remove_scripts(to_remove)
-	for _, entry in todo do
-		if entry.model then
-			local tree = sources[entry.key]
-			if type(tree) == "table" then
-				build_model(entry, tree)
-			end
-			continue
+	local removed = remove_entries(to_remove)
+	tree.write(todo, sources, known_hash, function(entry)
+		local model_tree = sources[entry.key]
+		if type(model_tree) == "table" then
+			build_model(entry, model_tree)
 		end
-
-		local inst = ensure(entry.path, entry.class)
-		if not entry.folder and inst:IsA("LuaSourceContainer") then
-			local source = sources[entry.key]
-			if source then
-				ScriptEditorService:UpdateSourceAsync(inst, function()
-					return source
-				end)
-				known_hash[entry.key] = entry.hash
-			end
-			if entry.run_context and inst:IsA("Script") then
-				pcall(function()
-					inst.RunContext = (Enum.RunContext :: any)[entry.run_context]
-				end)
-			end
-			if entry.disabled ~= nil and inst:IsA("BaseScript") then
-				inst.Enabled = not entry.disabled
-			end
-		end
-	end
+	end)
 	if recording then
 		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
 	end
@@ -912,7 +803,7 @@ end
 local function show_review(plan)
 	pending = plan
 	local count = #plan.create + #plan.update + #plan.remove
-	local deletes = #plan.remove > 0 and ` {#plan.remove} script(s) deleted on disk will be removed.` or " Nothing is deleted."
+	local deletes = #plan.remove > 0 and ` {#plan.remove} item(s) deleted on disk will be removed.` or " Nothing is deleted."
 	set_status(
 		"review",
 		count == 1 and "1 change ready" or `{count} changes ready`,
@@ -1273,6 +1164,7 @@ function poll_loop(my_id: number)
 		if not server_ok or restarted or result.resync then
 			if restarted then
 				log("server restarted, comparing everything again")
+				set_status("busy", "Server restarted", "Reconnected. Comparing everything again so Studio matches your files.")
 			end
 			full_sync()
 			continue

@@ -1,0 +1,29 @@
+# runs `xenon test` (every tests/*_test.luau) on every push and pull request
+name: test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  LUNE_VERSION: "0.10.4"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install lune
+        run: |
+          curl -sSLf -o lune.zip "https://github.com/lune-org/lune/releases/download/v${LUNE_VERSION}/lune-${LUNE_VERSION}-linux-x86_64.zip"
+          unzip -q lune.zip -d "$HOME/lune-bin"
+          chmod +x "$HOME/lune-bin/lune"
+          echo "$HOME/lune-bin" >> "$GITHUB_PATH"
+
+      - name: test
+        run: lune run xenon.luau test
+
+      - name: plugin builds
+        run: HOME="$RUNNER_TEMP" lune run xenon.luau build

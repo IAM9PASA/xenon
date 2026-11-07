@@ -54,6 +54,9 @@ local version = 0
 local known_hash = {} -- key -> hash studio had when xenon last synced it (conflict check)
 local pending = nil -- plan waiting for Apply
 local session = nil -- id of the server run we synced with. changes when `xenon serve` restarts
+local project = nil -- { name, folder } of the project we connected to, so a restart into another project is caught
+local status_state = "off"
+local unloading = false
 local server_ok = true -- false while the server does not answer
 local loop_id = 0 -- bumps on connect / disconnect so an old poll loop stops
 local diff_token = nil -- newest diff request, older answers are dropped
@@ -272,7 +275,8 @@ make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
 local function set_status(state: string, title: string, sentence: string)
 	local colors = { off = COLOR.grey, ok = COLOR.green, busy = COLOR.blue, review = COLOR.yellow, error = COLOR.red }
 	status_dot.BackgroundColor3 = colors[state] or COLOR.grey
-	header_title.Text = connected and `Xenon  ·  localhost:{settings.port}` or "Xenon"
+	status_state = state
+	header_title.Text = (connected and project) and `{project.name}  ·  localhost:{settings.port}` or "Xenon"
 	summary.Text = title
 	hint.Text = sentence
 end
@@ -1167,6 +1171,8 @@ local function connect()
 	connected = true
 	server_ok = true
 	session = info.session
+	project = { name = info.name, folder = info.folder }
+	log(`connected to "{info.name}"{info.folder and " (" .. info.folder .. ")" or ""}`)
 	loop_id += 1
 	refresh_buttons()
 	full_sync()
@@ -1177,6 +1183,7 @@ local function disconnect()
 	connected = false
 	pending = nil
 	session = nil
+	project = nil
 	loop_id += 1
 	set_live("off")
 	show_page("main")
@@ -1212,6 +1219,18 @@ function poll_loop(my_id: number)
 
 		-- back after a drop, a new `xenon serve` run, or too far behind: compare everything again
 		local restarted = result.session ~= nil and result.session ~= session
+		if restarted then
+			local info = request("GET", "/info")
+			if not connected or loop_id ~= my_id then
+				break
+			end
+			if info and project and (info.name ~= project.name or (info.folder and project.folder and info.folder ~= project.folder)) then
+				local was = project.name
+				disconnect()
+				set_status("error", "Different project", `The server now runs "{info.name}", not "{was}". Press Connect if you want to sync "{info.name}" into this place.`)
+				continue
+			end
+		end
 		if not server_ok or restarted or result.resync then
 			if restarted then
 				log("server restarted, comparing everything again")
@@ -1408,6 +1427,26 @@ end)
 
 plugin.Unloading:Connect(function()
 	connected = false
+	unloading = true
 end)
 
 disconnect()
+
+-- while not connected, ask the port which project is there so Connect never surprises you
+task.spawn(function()
+	while not unloading do
+		if not connected and widget.Enabled and status_state == "off" then
+			local info = request("GET", "/info")
+			if not connected and status_state == "off" then
+				if info and info.name then
+					summary.Text = `Ready: "{info.name}"`
+					hint.Text = `{info.folder or "xenon serve"} on port {settings.port}. Press Connect to sync it into this place.`
+				else
+					summary.Text = "Not connected"
+					hint.Text = "Run `xenon serve` in your game folder, then press Connect."
+				end
+			end
+		end
+		task.wait(3)
+	end
+end)

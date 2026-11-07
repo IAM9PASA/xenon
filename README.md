@@ -82,6 +82,8 @@ my-game/
     StarterPlayer/StarterCharacterScripts/, StarterGui/, ServerStorage/, ReplicatedFirst/
 ```
 
+The project name (`"name"` in `default.project.json`, set it with `xenon init my-game --name "Street Town"`) is what the plugin shows: before you press Connect it says which project is waiting on the port, and if the server restarts into a different project the plugin disconnects instead of syncing it.
+
 Put your place id in `placeIds` so Xenon only syncs into that game. The template lives in `template/`; edit it to change what new projects start with (`{{name}}` and `{{package}}` are filled in).
 
 ---

@@ -20,7 +20,7 @@ local assets = require("./src/assets")
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.9.2"
+local VERSION = "0.9.3"
 local DEFAULT_PORT = 34872
 
 local args = process.args
@@ -32,7 +32,7 @@ local HELP = [[
 xenon - safe roblox script sync: disk -> studio live, studio -> disk on Pull.
 
 usage:
-  xenon init [folder]                     new game project (default: this folder, must be empty)
+  xenon init [folder] [--name "Name"]     new game project (default: this folder, must be empty)
   xenon serve [project.json] [--port N]   start syncing (run it in your game folder)
   xenon plugin                            install the studio plugin
   xenon status [--port N]                 is a xenon server running on that port, for which project
@@ -82,13 +82,23 @@ local function serve()
 end
 
 local function init()
-	local folder = args[2]
+	local folder, display_name = nil, nil
+	local i = 2
+	while i <= #args do
+		if args[i] == "--name" or args[i] == "-n" then
+			display_name = args[i + 1] or fail("--name needs a value")
+			i += 2
+		else
+			folder = args[i]
+			i += 1
+		end
+	end
 	local target = caller_dir
 	if folder then
 		target = is_absolute(folder) and folder or (caller_dir .. "/" .. folder)
 	end
 	target = (target:gsub("[/\\]+$", ""))
-	local name = target:match("([^/\\]+)$") or "game"
+	local name = display_name or target:match("([^/\\]+)$") or "game"
 
 	local ok, message, created = require("./src/init_project")(assets.template(), target, name)
 	if not ok then

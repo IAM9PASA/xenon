@@ -11,7 +11,8 @@
 
 - [CLI](xenon.luau): xenon init / serve / build / test / version
 - [Init](src/init_project.luau) + [template/](template/): new project scaffold
-- [Installers](install.ps1), [install.sh](install.sh)
+- [Installers](install.ps1), [install.sh](install.sh) (source checkout); end users: `rokit add IAM9PASA/xenon`
+- [Assets](src/assets.luau), [bundler](tools/bundle.luau), [release workflow](.github/workflows/release.yml): standalone binary
 - [Server](src/server.luau): HTTP API on localhost
 - [Mapping](src/mapping.luau): files -> Studio instance paths
 - [Models](src/model.luau): .rbxm / .model.json / .txt -> JSON trees, .json / .toml -> modules

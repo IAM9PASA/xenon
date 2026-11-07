@@ -58,7 +58,8 @@ Studio plugin ── polls /changes every poll_seconds ──► plan (create/up
 
 ```
 xenon serve [project.json] [--port N | -p N]   default project: <XENON_CWD>/default.project.json, port 34872. Blocks; Ctrl+C stops.
-xenon build                                    writes Xenon.rbxm + installs it to Studio's Plugins folder
+xenon plugin                                   installs the plugin into Studio's Plugins folder (works from the release binary)
+xenon build                                    source checkout only: also writes Xenon.rbxm in the repo
 xenon test                                     runs tests/*_test.luau, exit 1 on failure
 xenon version | --version | -v                 prints "xenon <VERSION>" (VERSION constant in xenon.luau)
 xenon help | --help | -h
@@ -69,7 +70,9 @@ Errors exit with code 1 and a `[xenon] ...` message (e.g. missing project file).
 ### init / install
 
 - `xenon init [folder]` → `src/init_project.luau(template_dir, target, name)`: copies `template/` recursively, replaces `{{name}}` (folder name) and `{{package}}` (lowercase, dashes) in every file, renames `gitignore.txt` → `.gitignore`. MUST refuse a target that is a file or a non-empty folder (never overwrites). Tested in `tests/init_test.luau` (also maps the result).
-- `install.ps1` / `install.sh`: check rokit → `rokit install --no-trust-check` (lune) → add `bin/` to user PATH (Windows user env var / shell profile line) → `xenon build` → `xenon version`. Idempotent; no other system changes.
+- Release binary: `tools/bundle.luau` wraps every `src/*.luau` module + `xenon.luau` as functions in `dist/xenon.luau` with a tiny `require` shim (`@lune/*` goes to the real require), and replaces `src/assets.luau` with a generated module holding the plugin sources and every template file. `lune build` turns that into a standalone exe. `assets.bundled` is true there; `build` and `test` refuse. Anything new that reads a shipped file MUST go through `src/assets.luau`, never `fs` on a repo path, or the binary breaks.
+- `.github/workflows/release.yml`: on tag `vX.Y.Z` (must equal `VERSION`), tests, cross-builds 5 targets (mac built on a mac runner and ad-hoc codesigned), smoke-tests linux + mac binaries (`version`, `init`), publishes `xenon-<ver>-<target>.zip` + `Xenon.rbxm`. Installed with `rokit add IAM9PASA/xenon`.
+- `install.ps1` / `install.sh` (source checkout): check rokit → `rokit install --no-trust-check` (lune) → add `bin/` to user PATH (Windows user env var / shell profile line) → `xenon build` → `xenon version`. Idempotent; no other system changes.
 - `src/build.luau` plugin folder: `%LOCALAPPDATA%/Roblox/Plugins` on Windows, `~/Documents/Roblox/Plugins` otherwise.
 
 ## 5. Mapping rules (`src/mapping.luau`)

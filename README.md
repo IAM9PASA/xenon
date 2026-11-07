@@ -33,27 +33,28 @@ Stop the server with **Ctrl+C**.
 
 ## Install
 
-You need [rokit](https://github.com/rojo-rbx/rokit) (it installs Lune for you) and git.
+You need [rokit](https://github.com/rojo-rbx/rokit). No clone, no Lune needed: xenon is one standalone binary.
+
+```
+rokit add --global IAM9PASA/xenon
+xenon plugin
+```
+
+`xenon plugin` installs the Studio plugin (restart Studio after). Check: `xenon version`.
+Update later: `rokit update --global xenon`, then `xenon plugin` again.
+
+Pin it per project instead (so the whole team uses one version): run `rokit add IAM9PASA/xenon` in the game folder.
+Each [release](https://github.com/IAM9PASA/xenon/releases) also has `Xenon.rbxm` if you'd rather drop the plugin into Studio's Plugins folder yourself.
+
+### From source (to work on xenon)
 
 ```
 git clone https://github.com/IAM9PASA/xenon
 cd xenon
 ```
+Windows: `powershell -ExecutionPolicy Bypass -File install.ps1` - macOS / Linux / Git Bash: `sh install.sh`
 
-**Windows** (PowerShell):
-```
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
-
-**macOS / Linux / Git Bash:**
-```
-sh install.sh
-```
-
-The installer installs Lune, adds `xenon/bin` to your PATH, and builds + installs the Studio plugin. Nothing else.
-Then **open a new terminal** and **restart Studio**. Check: `xenon version`
-
-To update later: `git pull`, then run the installer again.
+The installer installs Lune, adds `xenon/bin` to your PATH, and builds + installs the plugin. Update: `git pull`, run it again.
 
 ---
 
@@ -147,8 +148,9 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 ```
 xenon init [folder]                     new game project from the template
 xenon serve [project.json] [--port N]   start syncing (default ./default.project.json, port 34872)
-xenon build                             build + install the Studio plugin
-xenon test                              run the tests
+xenon plugin                            install the Studio plugin
+xenon build                             (source checkout) build Xenon.rbxm + install the plugin
+xenon test                              (source checkout) run the tests
 xenon version                           print the version
 xenon help                              show this list
 ```
@@ -238,12 +240,23 @@ xenon build     # rebuild the plugin after editing plugin/xenon_plugin.luau
 | `src/build.luau` | packs the plugin into `Xenon.rbxm` |
 | `src/init_project.luau` | `xenon init`: copies `template/` |
 | `template/` | what a new project starts with |
-| `install.ps1`, `install.sh` | installers |
+| `install.ps1`, `install.sh` | installers for a source checkout |
+| `src/assets.luau` | plugin sources + template (from disk; baked in for the release binary) |
+| `tools/bundle.luau` | packs everything into `dist/xenon.luau` for `lune build` |
+| `.github/workflows/release.yml` | tag `vX.Y.Z` -> tests, binaries for windows / mac / linux, GitHub release |
 | `plugin/xenon_plugin.luau` | the Studio side: UI, settings, compare, apply |
 | `tests/` | `mapping_test.luau`, `wally_test.luau`, `diff_test.luau`, `pull_test.luau`, `init_test.luau` |
 | `docs/AI.md` | full spec for AI assistants |
 
 Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-based Luau runtime), Studio plugin in Luau, no other dependencies.
+
+### Releasing
+
+1. Bump `VERSION` in `xenon.luau`, commit.
+2. `git tag v0.9.0 && git push --tags`
+3. The release workflow runs the tests, builds `xenon-<version>-<os>-<arch>.zip` for windows-x86_64, linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64 plus `Xenon.rbxm`, and publishes the release (rokit picks the right zip by name).
+
+Try the binary locally: `lune run tools/bundle.luau` then `lune build dist/xenon.luau -o dist/xenon`.
 
 ## Not yet
 

@@ -1,9 +1,12 @@
--- xenon init: copies template/ into a new project folder.
+-- xenon init: copies the project template into a new project folder.
 -- never writes into a folder that already has files, so it can't overwrite anything.
 --
---   init_project(template_dir, target_dir, name) -> (ok, message, created_files)
+--   init_project(template, target_dir, name) -> (ok, message, created_files)
+--   template: a folder path, or { ["sub/path.ext"] = contents } (what assets.template() gives)
 
 local fs = require("@lune/fs")
+
+local assets = require("./assets")
 
 -- template files with a different name on disk (so they don't act on the xenon repo itself)
 local RENAME = {
@@ -20,25 +23,22 @@ local function fill(text: string, name: string): string
 	return (text:gsub("{{name}}", name):gsub("{{package}}", package_name(name)))
 end
 
-local function copy(from_dir: string, to_dir: string, name: string, created)
-	fs.writeDir(to_dir)
-	local entries = fs.readDir(from_dir)
-	table.sort(entries)
-	for _, entry in entries do
-		local source = from_dir .. "/" .. entry
-		local target = to_dir .. "/" .. (RENAME[entry] or entry)
-		if fs.isDir(source) then
-			copy(source, target, name, created)
-		else
-			fs.writeFile(target, fill(fs.readFile(source), name))
-			table.insert(created, target)
-		end
+local function make_dirs(path: string)
+	local parent = path:match("^(.+)[/\\][^/\\]+$")
+	if parent and not fs.isDir(parent) then
+		make_dirs(parent)
+	end
+	if not fs.isDir(path) then
+		fs.writeDir(path)
 	end
 end
 
-return function(template_dir: string, target_dir: string, name: string)
-	if not fs.isDir(template_dir) then
-		return false, `template folder missing: {template_dir}`, {}
+return function(template: string | { [string]: string }, target_dir: string, name: string)
+	if type(template) == "string" then
+		if not fs.isDir(template) then
+			return false, `template folder missing: {template}`, {}
+		end
+		template = assets.read_tree(template)
 	end
 	if fs.isFile(target_dir) then
 		return false, `{target_dir} is a file`, {}
@@ -47,7 +47,21 @@ return function(template_dir: string, target_dir: string, name: string)
 		return false, `{target_dir} is not empty. xenon init only writes into a new or empty folder`, {}
 	end
 
+	local paths = {}
+	for path in template :: { [string]: string } do
+		table.insert(paths, path)
+	end
+	table.sort(paths)
+
 	local created = {}
-	copy(template_dir, target_dir, name, created)
+	make_dirs(target_dir)
+	for _, path in paths do
+		local dir, file = path:match("^(.*)/([^/]+)$")
+		dir, file = dir or "", file or path
+		local target = target_dir .. (dir ~= "" and "/" .. dir or "") .. "/" .. (RENAME[file] or file)
+		make_dirs(target:match("^(.+)/[^/]+$"))
+		fs.writeFile(target, fill((template :: any)[path], name))
+		table.insert(created, target)
+	end
 	return true, `created {name} ({#created} files)`, created
 end

@@ -1,0 +1,97 @@
+# push a tag like v0.9.0 (must match VERSION in xenon.luau) -> builds standalone xenon binaries
+# and a GitHub release that rokit can install:  rokit add IAM9PASA/xenon
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  LUNE_VERSION: "0.10.4"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-latest, lune: linux-x86_64, targets: "windows-x86_64 linux-x86_64 linux-aarch64", smoke: linux-x86_64 }
+          - { runner: macos-latest, lune: macos-aarch64, targets: "macos-x86_64 macos-aarch64", smoke: macos-aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install lune
+        run: |
+          curl -sSLf -o lune.zip "https://github.com/lune-org/lune/releases/download/v${LUNE_VERSION}/lune-${LUNE_VERSION}-${{ matrix.lune }}.zip"
+          unzip -q lune.zip -d "$HOME/lune-bin"
+          chmod +x "$HOME/lune-bin/lune"
+          echo "$HOME/lune-bin" >> "$GITHUB_PATH"
+
+      - name: version matches tag
+        run: |
+          version=$(grep -oE 'local VERSION = "[^"]+"' xenon.luau | cut -d'"' -f2)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match VERSION $version in xenon.luau"; exit 1
+          fi
+
+      - name: test
+        run: lune run xenon.luau test
+
+      - name: bundle + build
+        run: |
+          lune run tools/bundle.luau
+          mkdir -p out
+          for target in ${{ matrix.targets }}; do
+            exe=xenon; case "$target" in windows-*) exe=xenon.exe ;; esac
+            mkdir -p "build/$target"
+            lune build dist/xenon.luau -t "$target" -o "build/$target/$exe"
+            chmod +x "build/$target/$exe"
+            # apple silicon refuses unsigned binaries: ad-hoc sign the mac ones
+            case "$target" in macos-*) codesign --force --sign - "build/$target/$exe" || echo "codesign failed for $target" ;; esac
+            (cd "build/$target" && zip -q "../../out/xenon-${VERSION}-${target}.zip" "$exe")
+          done
+
+      - name: smoke test the built binary
+        run: |
+          dir=$(mktemp -d)
+          cp "build/${{ matrix.smoke }}/xenon" "$dir/"
+          cd "$dir"
+          ./xenon version
+          ./xenon init demo
+          test -f demo/default.project.json
+          test -f demo/src/ServerScriptService/Server/main.server.luau
+
+      - name: plugin model
+        if: matrix.runner == 'ubuntu-latest'
+        run: |
+          lune run xenon.luau build
+          cp Xenon.rbxm out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xenon-${{ matrix.lune }}
+          path: out/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "xenon $GITHUB_REF_NAME" \
+            --notes "Install: \`rokit add IAM9PASA/xenon\` then \`xenon plugin\` (installs the Studio plugin). Or drag Xenon.rbxm into your Plugins folder."

@@ -5,3 +5,6 @@ Xenon.rbxm
 tests/_fixture/
 tests/_pull_fixture/
 tests/_init_fixture/
+
+# release build output: lune run tools/bundle.luau, lune build
+dist/

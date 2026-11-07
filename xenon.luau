@@ -1,5 +1,7 @@
--- xenon cli. run through bin/xenon(.cmd), which sets XENON_CWD to the folder you called it from.
+-- xenon cli. from a source checkout it runs through bin/xenon(.cmd), which sets XENON_CWD to the folder
+-- you called it from. the release exe (tools/bundle.luau + lune build) runs in your folder directly.
 --   xenon init [folder]                     new project from template/ (folder must be new or empty)
+--   xenon plugin                            install the studio plugin
 --   xenon serve [project.json] [--port N]   sync that project to studio (default: ./default.project.json, port 34872)
 --   xenon build                             build + install the studio plugin
 --   xenon test                              run the tests
@@ -10,16 +12,18 @@
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 
+local assets = require("./src/assets")
+
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.8.0"
+local VERSION = "0.9.0"
 local DEFAULT_PORT = 34872
 
 local args = process.args
 local command = args[1] or "help"
 -- the launcher changes into the xenon folder (so lune is found), the user's folder comes in through XENON_CWD
-local caller_dir = process.env.XENON_CWD or process.cwd
+local caller_dir = ((process.env.XENON_CWD or process.cwd):gsub("[/\\]+$", ""))
 
 local HELP = [[
 xenon - safe roblox script sync: disk -> studio live, studio -> disk on Pull.
@@ -27,9 +31,12 @@ xenon - safe roblox script sync: disk -> studio live, studio -> disk on Pull.
 usage:
   xenon init [folder]                     new game project (default: this folder, must be empty)
   xenon serve [project.json] [--port N]   start syncing (run it in your game folder)
-  xenon build                             build + install the studio plugin
-  xenon test                              run the tests
+  xenon plugin                            install the studio plugin
   xenon version                           print the version
+
+from a source checkout also:
+  xenon build                             build Xenon.rbxm + install the plugin
+  xenon test                              run the tests
 
 then in studio: Plugins tab -> Xenon -> Connect]]
 
@@ -79,7 +86,7 @@ local function init()
 	target = (target:gsub("[/\\]+$", ""))
 	local name = target:match("([^/\\]+)$") or "game"
 
-	local ok, message, created = require("./src/init_project")("template", target, name)
+	local ok, message, created = require("./src/init_project")(assets.template(), target, name)
 	if not ok then
 		fail(message)
 	end
@@ -90,7 +97,7 @@ local function init()
 	local steps = {
 		"",
 		"next:",
-		folder and ("  cd " .. folder) or nil,
+		folder and ("  cd " .. (folder:find(" ") and `"{folder}"` or folder)) or nil,
 		"  rokit install      (wally)",
 		"  xenon serve",
 		"  studio: Plugins -> Xenon -> Connect",
@@ -130,10 +137,17 @@ if command == "init" then
 	init()
 elseif command == "serve" then
 	serve()
-elseif command == "build" then
-	require("./src/build")()
-elseif command == "test" then
-	run_tests()
+elseif command == "plugin" then
+	require("./src/build")(false)
+elseif command == "build" or command == "test" then
+	if assets.bundled then
+		fail(`"{command}" needs the xenon source folder. to install the plugin: xenon plugin`)
+	end
+	if command == "build" then
+		require("./src/build")(true)
+	else
+		run_tests()
+	end
 elseif command == "version" or command == "--version" or command == "-v" then
 	print("xenon " .. VERSION)
 elseif command == "help" or command == "--help" or command == "-h" then

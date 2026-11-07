@@ -5,6 +5,8 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # manual run from a branch: builds it and the release step creates the tag v<VERSION> on that commit
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -35,7 +37,7 @@ jobs:
         run: |
           version=$(grep -oE 'local VERSION = "[^"]+"' xenon.luau | cut -d'"' -f2)
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "tag $GITHUB_REF_NAME does not match VERSION $version in xenon.luau"; exit 1
           fi
 
@@ -79,6 +81,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: release tag
+        run: |
+          version=$(grep -oE 'local VERSION = "[^"]+"' xenon.luau | cut -d'"' -f2)
+          echo "TAG=v$version" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: out
@@ -89,7 +98,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la out
-          gh release create "$GITHUB_REF_NAME" out/* \
+          gh release create "$TAG" out/* \
+            --target "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "xenon $GITHUB_REF_NAME" \
+            --title "xenon $TAG" \
             --notes "Install: \`rokit add IAM9PASA/xenon\` then \`xenon plugin\` (installs the Studio plugin). Or drag Xenon.rbxm into your Plugins folder."

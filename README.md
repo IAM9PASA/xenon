@@ -260,6 +260,8 @@ Stack: Luau everywhere. Server on [Lune](https://lune-org.github.io/docs) (Rust-
 2. `git tag v0.9.0 && git push --tags`
 3. The release workflow runs the tests, builds `xenon-<version>-<os>-<arch>.zip` for windows-x86_64, linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64 plus `Xenon.rbxm`, and publishes the release (rokit picks the right zip by name).
 
+No tag push possible? Run the **release** workflow by hand from `main` (Actions tab → release → Run workflow): it creates the tag `v<VERSION>` with the release.
+
 Try the binary locally: `lune run tools/bundle.luau` then `lune build dist/xenon.luau -o dist/xenon`.
 
 ## Not yet

@@ -58,6 +58,7 @@ Studio plugin ── polls /changes every poll_seconds ──► plan (create/up
 
 ```
 xenon serve [project.json] [--port N | -p N]   default project: <XENON_CWD>/default.project.json, port 34872. Blocks; Ctrl+C stops.
+xenon status [--port N]                        GET /info on that port: xenon (name, folder, places) / other program / free. exit 1 when taken by non-xenon
 xenon plugin                                   installs the plugin into Studio's Plugins folder (works from the release binary)
 xenon build                                    source checkout only: also writes Xenon.rbxm in the repo
 xenon test                                     runs tests/*_test.luau, exit 1 on failure

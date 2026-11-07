@@ -1,7 +1,7 @@
 -- xenon server: watches the project's files and serves them to the studio plugin.
 -- started by the cli:  xenon serve [project.json] [--port N]   (see xenon.luau)
 -- api (json, localhost only):
---   GET  /info              { name, placeIds, version, scripts }
+--   GET  /info              { name, placeIds, version, session, scripts, folder }
 --   GET  /snapshot          { version, entries = [{ key, path, class, hash, disabled, folder }] }   no sources
 --   POST /sources {keys}    { [key] = source }
 --   GET  /changes?since=N   { version, resync?, changes = [{ version, kind, entry(+source) }] }
@@ -121,7 +121,7 @@ local function handle(request)
 				scripts += 1
 			end
 		end
-		return json({ name = project.name, placeIds = project.place_ids, version = version, session = session, scripts = scripts })
+		return json({ name = project.name, placeIds = project.place_ids, version = version, session = session, scripts = scripts, folder = project.base_dir })
 	end
 
 	if path == "/snapshot" then
@@ -226,6 +226,7 @@ function server.start(project_file: string, port: number)
 		local message = tostring(serve_error)
 		if message:find("10048", 1, true) or message:lower():find("address already in use", 1, true) then
 			print(`[xenon] port {port} is already in use: another xenon serve is probably still running (another terminal, or a game folder you synced before).`)
+			print(`[xenon] see which: xenon status --port {port}`)
 			print(`[xenon] stop that one (Ctrl+C in its terminal), or use another port: xenon serve --port {port + 1}  (and set the same port in the plugin's settings)`)
 		else
 			print(`[xenon] can't start the server on port {port}: {message}`)

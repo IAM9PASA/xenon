@@ -2,6 +2,7 @@
 -- you called it from. the release exe (tools/bundle.luau + lune build) runs in your folder directly.
 --   xenon init [folder]                     new project from template/ (folder must be new or empty)
 --   xenon plugin                            install the studio plugin
+--   xenon status [--port N]                 is a xenon server running on that port, and for which project
 --   xenon serve [project.json] [--port N]   sync that project to studio (default: ./default.project.json, port 34872)
 --   xenon build                             build + install the studio plugin
 --   xenon test                              run the tests
@@ -11,13 +12,15 @@
 
 local fs = require("@lune/fs")
 local process = require("@lune/process")
+local net = require("@lune/net")
+local serde = require("@lune/serde")
 
 local assets = require("./src/assets")
 
 
 -- VARIABLES -------------------------
 
-local VERSION = "0.9.1"
+local VERSION = "0.9.2"
 local DEFAULT_PORT = 34872
 
 local args = process.args
@@ -32,6 +35,7 @@ usage:
   xenon init [folder]                     new game project (default: this folder, must be empty)
   xenon serve [project.json] [--port N]   start syncing (run it in your game folder)
   xenon plugin                            install the studio plugin
+  xenon status [--port N]                 is a xenon server running on that port, for which project
   xenon version                           print the version
 
 from a source checkout also:
@@ -112,6 +116,45 @@ local function init()
 	print(table.concat(lines, "\n"))
 end
 
+local function status()
+	local port = DEFAULT_PORT
+	if args[2] == "--port" or args[2] == "-p" then
+		port = tonumber(args[3]) or fail("--port needs a number")
+	elseif args[2] then
+		port = tonumber(args[2]) or fail("usage: xenon status [--port N]")
+	end
+
+	local asked, response = pcall(net.request, `http://localhost:{port}/info`)
+	if asked then
+		local decoded, info = pcall(serde.decode, "json", response.body)
+		if response.ok and decoded and type(info) == "table" and info.session then
+			print(`[xenon] port {port}: xenon is running "{info.name}" ({info.scripts} scripts)`)
+			if info.folder then
+				print(`  folder: {info.folder}`)
+			end
+			if info.placeIds and #info.placeIds > 0 then
+				print(`  places: {table.concat(info.placeIds, ", ")}`)
+			end
+			return
+		end
+		print(`[xenon] port {port} is used by something that is not xenon. pick another: xenon serve --port {port + 1}`)
+		process.exit(1)
+	end
+
+	-- nothing answered http: free, unless a non-http program holds it (binding tells)
+	-- shortcut: a program bound only to 127.0.0.1 still reads as free (serve binds all interfaces), upgrade with a raw tcp connect if that bites
+	local bound, handle = pcall(net.serve, port, function()
+		return { status = 503, body = "" }
+	end)
+	if bound then
+		handle.stop()
+		print(`[xenon] port {port} is free: no xenon server running. start one: xenon serve`)
+	else
+		print(`[xenon] port {port} is used by another program (not xenon). pick another: xenon serve --port {port + 1}`)
+		process.exit(1)
+	end
+end
+
 local function run_tests()
 	local failed = 0
 	for _, name in fs.readDir("tests") do
@@ -137,6 +180,8 @@ if command == "init" then
 	init()
 elseif command == "serve" then
 	serve()
+elseif command == "status" then
+	status()
 elseif command == "plugin" then
 	require("./src/build")(false)
 elseif command == "build" or command == "test" then

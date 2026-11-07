@@ -149,6 +149,7 @@ Click **Settings** in the plugin. Saved per user, take effect right away.
 xenon init [folder]                     new game project from the template
 xenon serve [project.json] [--port N]   start syncing (default ./default.project.json, port 34872)
 xenon plugin                            install the Studio plugin
+xenon status [--port N]                 is xenon running on that port, and for which project folder
 xenon build                             (source checkout) build Xenon.rbxm + install the plugin
 xenon test                              (source checkout) run the tests
 xenon version                           print the version

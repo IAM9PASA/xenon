@@ -51,8 +51,6 @@ jobs:
             mkdir -p "build/$target"
             lune build dist/xenon.luau -t "$target" -o "build/$target/$exe"
             chmod +x "build/$target/$exe"
-            # apple silicon refuses unsigned binaries: ad-hoc sign the mac ones
-            case "$target" in macos-*) codesign --force --sign - "build/$target/$exe" || echo "codesign failed for $target" ;; esac
             (cd "build/$target" && zip -q "../../out/xenon-${VERSION}-${target}.zip" "$exe")
           done
 

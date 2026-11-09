@@ -9,7 +9,7 @@
 
 -- SERVICES -------------------------
 
-local fs = require("@lune/fs")
+local fs = table.clone(require("@lune/fs")) -- a copy, so tools/bench.luau can count calls (mapping.fs)
 local serde = require("@lune/serde")
 
 
@@ -305,5 +305,6 @@ function mapping.snapshot(project, cache)
 end
 
 mapping.script_kind = script_kind
+mapping.fs = fs
 
 return mapping

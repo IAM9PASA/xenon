@@ -43,11 +43,12 @@ write("default.project.json", [[{"name":"bench","tree":{"$className":"DataModel"
 	"ReplicatedStorage":{"$path":"src/shared","Packages":{"$path":"Packages"}},
 	"ServerScriptService":{"$path":"src/server"}}}]])
 
--- count fs calls: mapping reads fs.* at call time, so wrapping the shared table counts them
+-- count fs calls: mapping reads mapping.fs.* at call time (lune's own fs table is read-only)
 local counts = {}
+local mfs = mapping.fs
 for _, name in { "isFile", "isDir", "readDir", "readFile", "metadata" } do
-	local original = fs[name]
-	fs[name] = function(...)
+	local original = mfs[name]
+	mfs[name] = function(...)
 		counts[name] = (counts[name] or 0) + 1
 		return original(...)
 	end

@@ -66,16 +66,22 @@ local function other_kind(file_name: string): (string?, string?)
 	return nil, nil
 end
 
-local function read_json(path: string, label: string)
-	if not fs.isFile(path) then
+-- project / meta json from a listed folder, decoded once per change. nil when missing or bad
+local function listed_json(dir: string, name: string, info, cache, label: string)
+	local item = info[name]
+	if not item or item.dir then
 		return nil
 	end
-	local ok, data = pcall(serde.decode, "json", fs.readFile(path))
-	if ok and type(data) == "table" then
-		return data
-	end
-	warn(`[xenon] bad {label} {path}`)
-	return nil
+	local file = dir .. "/" .. name
+	local hit = cached(file, cache, function(contents)
+		local ok, data = pcall(serde.decode, "json", contents)
+		if ok and type(data) == "table" then
+			return { data = data }
+		end
+		warn(`[xenon] bad {label} {file}`)
+		return {}
+	end, item.stamp)
+	return hit.data
 end
 
 local function is_disabled(meta, source: string): boolean
@@ -92,10 +98,35 @@ local function child_path(path: { string }, name: string): { string }
 	return copy
 end
 
--- mtime cache: a file is only re-read and re-converted when its timestamp changes
-local function cached(file: string, cache, build)
-	local modified = fs.metadata(file).modifiedAt
-	local stamp = modified and modified.unixTimestampMillis or 0
+local function stamp_of(meta): number
+	local modified = meta and meta.modifiedAt
+	return modified and modified.unixTimestampMillis or 0
+end
+
+-- one readDir + one metadata per entry: names (sorted) and name -> { dir, stamp }.
+-- every other check (init files, meta files, project files) looks the name up here, no extra fs call
+local function list_dir(dir: string)
+	local names = fs.readDir(dir)
+	table.sort(names)
+	local info = {}
+	for _, name in names do
+		local full = dir .. "/" .. name
+		local ok, meta = pcall(fs.metadata, full)
+		if ok and meta and meta.exists then
+			local is_dir = meta.kind == "dir"
+			if meta.kind == "symlink" then
+				is_dir = fs.isDir(full)
+			end
+			info[name] = { dir = is_dir, stamp = stamp_of(meta) }
+		end
+	end
+	return names, info
+end
+
+-- mtime cache: a file is only re-read and re-converted when its timestamp changes.
+-- stamp comes from list_dir; nil = look it up (a $path that points straight at a file)
+local function cached(file: string, cache, build, stamp: number?)
+	stamp = stamp or stamp_of(fs.metadata(file))
 	local hit = cache[file]
 	if hit and hit.stamp == stamp then
 		return hit
@@ -107,11 +138,11 @@ local function cached(file: string, cache, build)
 	return fresh
 end
 
-local function push_script(out, path, class, file, meta, cache, source_override)
+local function push_script(out, path, class, file, meta, cache, source_override, stamp: number?)
 	local item = cached(file, cache, function(contents)
 		local source = source_override and source_override(contents) or (contents:gsub("\r\n", "\n"))
 		return { source = source, hash = checksum(source) }
-	end)
+	end, stamp)
 
 	-- modules have no Enabled / RunContext, so they carry neither
 	local disabled, run_context = nil, nil
@@ -135,7 +166,7 @@ local function push_script(out, path, class, file, meta, cache, source_override)
 	})
 end
 
-local function push_model(out, path, kind, file, cache)
+local function push_model(out, path, kind, file, cache, stamp: number?)
 	local name = path[#path]
 	local item = cached(file, cache, function(contents)
 		local ok, tree = pcall(function()
@@ -151,7 +182,7 @@ local function push_model(out, path, kind, file, cache)
 			return { failed = true }
 		end
 		return { tree = tree, hash = checksum(contents) }
-	end)
+	end, stamp)
 	if item.failed then
 		return
 	end
@@ -210,19 +241,21 @@ end
 
 -- a folder is a nested project, a script (init file inside), or a container (Folder / init.meta.json className)
 function scan_folder(dir: string, path: { string }, out, cache, class_name: string?)
-	local project = read_json(dir .. "/default.project.json", "project file")
+	local names, info = list_dir(dir)
+	local project = listed_json(dir, "default.project.json", info, cache, "project file")
 	if project and type(project.tree) == "table" then
 		scan_project_node(project.tree, dir, path, out, cache)
 		return
 	end
 
-	local meta = read_json(dir .. "/init.meta.json", "meta file")
+	local meta = listed_json(dir, "init.meta.json", info, cache, "meta file")
 	for _, pair in SCRIPT_SUFFIXES do
-		local init_file = dir .. "/init" .. pair[1]
-		if fs.isFile(init_file) then
-			push_script(out, path, pair[2], init_file, meta, cache)
+		local init_name = "init" .. pair[1]
+		local item = info[init_name]
+		if item and not item.dir then
+			push_script(out, path, pair[2], dir .. "/" .. init_name, meta, cache, nil, item.stamp)
 			out[#out].dir = dir -- children of this script live in this folder
-			scan(dir, path, out, cache)
+			scan(dir, path, out, cache, names, info)
 			return
 		end
 	end
@@ -234,22 +267,29 @@ function scan_folder(dir: string, path: { string }, out, cache, class_name: stri
 		folder = true,
 		dir = dir,
 	})
-	scan(dir, path, out, cache)
+	scan(dir, path, out, cache, names, info)
 end
 
-function scan(dir: string, path: { string }, out, cache)
-	local names = fs.readDir(dir)
-	table.sort(names)
+-- names / info: the folder's listing when the caller already has it
+function scan(dir: string, path: { string }, out, cache, names, info)
+	if not names then
+		names, info = list_dir(dir)
+	end
 
 	for _, name in names do
+		local item = info[name]
+		if not item then
+			continue -- gone between readDir and metadata
+		end
 		local full = dir .. "/" .. name
-		if fs.isDir(full) then
+		if item.dir then
 			scan_folder(full, child_path(path, name), out, cache)
 		else
 			local base, class = script_kind(name)
 			if base then
 				if base ~= "init" then
-					push_script(out, child_path(path, base), class, full, read_json(dir .. "/" .. base .. ".meta.json", "meta file"), cache)
+					local meta = listed_json(dir, base .. ".meta.json", info, cache, "meta file")
+					push_script(out, child_path(path, base), class, full, meta, cache, nil, item.stamp)
 				end
 			else
 				local other, kind = other_kind(name)
@@ -257,9 +297,9 @@ function scan(dir: string, path: { string }, out, cache)
 					if kind == "json" or kind == "toml" then
 						push_script(out, child_path(path, other), "ModuleScript", full, nil, cache, function(contents)
 							return model.data_module(contents, kind)
-						end)
+						end, item.stamp)
 					else
-						push_model(out, child_path(path, other), kind, full, cache)
+						push_model(out, child_path(path, other), kind, full, cache, item.stamp)
 					end
 				end
 			end

@@ -72,26 +72,28 @@ local function record(kind: string, entry)
 end
 
 local function rescan()
-	local list = mapping.snapshot(project, cache)
-	local fresh = index(list)
+	local fresh = index(mapping.snapshot(project, cache))
 
-	-- parents before children, so the plugin never has to guess a container
-	table.sort(list, function(a, b)
-		if #a.path ~= #b.path then
-			return #a.path < #b.path
-		end
-		return a.key < b.key
-	end)
-	for _, entry in list do
-		local key = entry.key
+	local changed = {}
+	for key, entry in fresh do
 		-- back within the grace time: compare with what it was before it went missing
 		local old = current[key] or (missing[key] and missing[key].entry)
 		missing[key] = nil
 		if not old then
-			record("create", entry)
+			table.insert(changed, { kind = "create", entry = entry })
 		elseif entry.hash ~= old.hash or entry.class ~= old.class or entry.disabled ~= old.disabled or entry.run_context ~= old.run_context then
-			record("update", entry)
+			table.insert(changed, { kind = "update", entry = entry })
 		end
+	end
+	-- parents before children, so the plugin never has to guess a container (only the changes are sorted)
+	table.sort(changed, function(a, b)
+		if #a.entry.path ~= #b.entry.path then
+			return #a.entry.path < #b.entry.path
+		end
+		return a.entry.key < b.entry.key
+	end)
+	for _, change in changed do
+		record(change.kind, change.entry)
 	end
 
 	-- a file counts as deleted only after REMOVE_AFTER rescans in a row without it.

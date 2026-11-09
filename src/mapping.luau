@@ -11,6 +11,7 @@
 
 local fs = table.clone(require("@lune/fs")) -- a copy, so tools/bench.luau can count calls (mapping.fs)
 local serde = require("@lune/serde")
+local datetime = require("@lune/datetime")
 
 
 -- MODULES -------------------------
@@ -34,6 +35,15 @@ local SCRIPT_SUFFIXES = {
 local IGNORED_SUFFIXES = { ".meta.json", ".project.json" }
 
 local mapping = {}
+
+-- wally packages (folders right under an _Index) are reused between rescans while none of their
+-- folders changed: wally only writes new files, so a changed package always changes a folder stamp.
+-- a package touched in the last SETTLE_MS (being installed) is scanned in full, and every
+-- FULL_EVERY-th rescan ignores the reuse (safety net for in-place edits inside _Index)
+mapping.SETTLE_MS = 2000
+mapping.FULL_EVERY = 30
+
+local recorder = nil -- folder -> stamp, while scanning one wally package
 
 
 -- FUNCTIONS -------------------------
@@ -100,6 +110,9 @@ local function list_dir(dir: string)
 				is_dir = fs.isDir(full)
 			end
 			info[name] = { dir = is_dir, stamp = stamp_of(meta) }
+			if is_dir and recorder then
+				recorder[full] = info[name].stamp
+			end
 		end
 	end
 	return names, info
@@ -270,11 +283,52 @@ function scan_folder(dir: string, path: { string }, out, cache, class_name: stri
 	scan(dir, path, out, cache, names, info)
 end
 
+-- a reused package is valid while every folder in it still has the stamp it had
+local function package_unchanged(package, stamp: number, cache): boolean
+	if cache.full_scan or package.stamp ~= stamp or package.recent then
+		return false
+	end
+	for dir, dir_stamp in package.dirs do
+		local ok, meta = pcall(fs.metadata, dir)
+		if not ok or not meta or not meta.exists or stamp_of(meta) ~= dir_stamp then
+			return false
+		end
+	end
+	return true
+end
+
+local function scan_package(full: string, path: { string }, stamp: number, out, cache)
+	cache.packages = cache.packages or {}
+	local package = cache.packages[full]
+	if package and package_unchanged(package, stamp, cache) then
+		table.move(package.entries, 1, #package.entries, #out + 1, out)
+		return
+	end
+
+	local before = #out
+	local saved = recorder
+	recorder = {}
+	scan_folder(full, path, out, cache)
+	local dirs = recorder
+	recorder = saved
+
+	local settled = datetime.now().unixTimestampMillis - mapping.SETTLE_MS
+	local recent = stamp > settled
+	for _, dir_stamp in dirs do
+		if dir_stamp > settled then
+			recent = true
+			break
+		end
+	end
+	cache.packages[full] = { stamp = stamp, dirs = dirs, recent = recent, entries = table.move(out, before + 1, #out, 1, {}) }
+end
+
 -- names / info: the folder's listing when the caller already has it
 function scan(dir: string, path: { string }, out, cache, names, info)
 	if not names then
 		names, info = list_dir(dir)
 	end
+	local wally_index = dir:match("[/\\]_Index$") ~= nil and recorder == nil
 
 	for _, name in names do
 		local item = info[name]
@@ -282,7 +336,9 @@ function scan(dir: string, path: { string }, out, cache, names, info)
 			continue -- gone between readDir and metadata
 		end
 		local full = dir .. "/" .. name
-		if item.dir then
+		if item.dir and wally_index then
+			scan_package(full, child_path(path, name), item.stamp, out, cache)
+		elseif item.dir then
 			scan_folder(full, child_path(path, name), out, cache)
 		else
 			local base, class = script_kind(name)
@@ -333,6 +389,8 @@ end
 function mapping.snapshot(project, cache)
 	local out = {}
 	cache = cache or {}
+	cache.scans = (cache.scans or 0) + 1
+	cache.full_scan = cache.scans % mapping.FULL_EVERY == 0
 	for _, root in project.roots do
 		if fs.isDir(root.dir) then
 			-- the root is a service (or a node under one): only its children are mapped

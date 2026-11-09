@@ -278,6 +278,23 @@ bright = tree.find(BRIGHT)
 check("restart: Folder upgraded to the package module", bright and bright.ClassName == "ModuleScript" and bright.Source:find("bright") ~= nil)
 check("restart: then live again", tick() == "ok")
 
+-- 6. settled packages are reused between rescans; a file wally adds inside one still shows up
+local task = require("@lune/task")
+local mapping = require("../src/mapping")
+mapping.SETTLE_MS = 0
+task.wait(0.05)
+tick(2) -- the second rescan reuses every package
+write(PKG .. "/bright/src/extra.luau", "return 'extra'")
+task.wait(0.05)
+tick()
+check("reused package: new file inside shows up", at(BRIGHT, "extra") and at(BRIGHT, "extra").Source == "return 'extra'")
+remove(PKG .. "/bright/src/extra.luau")
+task.wait(0.05)
+tick(6)
+check("reused package: removed file goes", at(BRIGHT, "extra") == nil)
+check("reused package: rest still there", at(BRIGHT, "motion") ~= nil)
+mapping.SETTLE_MS = 2000
+
 fs.removeDir(ROOT)
 print(failures == 0 and "all live tests passed" or `{failures} live test(s) failed`)
 if failures > 0 then

@@ -54,6 +54,9 @@ for _, name in { "isFile", "isDir", "readDir", "readFile", "metadata" } do
 	end
 end
 
+-- the fixture was just written: let packages count as settled, as they are in a real project
+mapping.SETTLE_MS = 0
+
 local project = mapping.load_project(ROOT .. "/default.project.json")
 local cache = {}
 

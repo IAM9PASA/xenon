@@ -66,24 +66,6 @@ local function other_kind(file_name: string): (string?, string?)
 	return nil, nil
 end
 
--- project / meta json from a listed folder, decoded once per change. nil when missing or bad
-local function listed_json(dir: string, name: string, info, cache, label: string)
-	local item = info[name]
-	if not item or item.dir then
-		return nil
-	end
-	local file = dir .. "/" .. name
-	local hit = cached(file, cache, function(contents)
-		local ok, data = pcall(serde.decode, "json", contents)
-		if ok and type(data) == "table" then
-			return { data = data }
-		end
-		warn(`[xenon] bad {label} {file}`)
-		return {}
-	end, item.stamp)
-	return hit.data
-end
-
 local function is_disabled(meta, source: string): boolean
 	if source:sub(1, 9) == "--disable" then
 		return true
@@ -136,6 +118,24 @@ local function cached(file: string, cache, build, stamp: number?)
 	fresh.stamp = stamp
 	cache[file] = fresh
 	return fresh
+end
+
+-- project / meta json from a listed folder, decoded once per change. nil when missing or bad
+local function listed_json(dir: string, name: string, info, cache, label: string)
+	local item = info[name]
+	if not item or item.dir then
+		return nil
+	end
+	local file = dir .. "/" .. name
+	local hit = cached(file, cache, function(contents)
+		local ok, data = pcall(serde.decode, "json", contents)
+		if ok and type(data) == "table" then
+			return { data = data }
+		end
+		warn(`[xenon] bad {label} {file}`)
+		return {}
+	end, item.stamp)
+	return hit.data
 end
 
 local function push_script(out, path, class, file, meta, cache, source_override, stamp: number?)

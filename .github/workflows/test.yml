@@ -27,3 +27,27 @@ jobs:
 
       - name: plugin builds
         run: HOME="$RUNNER_TEMP" lune run xenon.luau build
+
+  # cost of one rescan (what `xenon serve` does every second); numbers only, never fails the run
+  bench:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, lune: linux-x86_64 }
+          - { runner: windows-latest, lune: windows-x86_64 }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install lune
+        run: |
+          curl -sSLf -o lune.zip "https://github.com/lune-org/lune/releases/download/v${LUNE_VERSION}/lune-${LUNE_VERSION}-${{ matrix.lune }}.zip"
+          unzip -q lune.zip -d "$HOME/lune-bin"
+          chmod +x "$HOME/lune-bin/lune"* || true
+          echo "$HOME/lune-bin" >> "$GITHUB_PATH"
+
+      - name: bench
+        run: lune run tools/bench.luau 200
